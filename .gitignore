@@ -1,0 +1,51 @@
+# ===== 密钥 / 证书 / 令牌（绝不提交）=====
+data/
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+config.json
+tokens.json
+secrets.json
+.env
+.env.*
+
+# ===== Android 签名与本地环境 =====
+**/local.properties
+**/key.properties
+**/*.bak-*
+
+# ===== 构建产物 =====
+build/
+**/build/
+.dart_tool/
+.gradle/
+.idea/
+*.iml
+flutter_app/windows/flutter/ephemeral/
+flutter_app/android/.gradle/
+flutter_app/android/app/.cxx/
+*.exe
+*.exe~
+*.apk
+*.aab
+*.dll
+*.so
+*.log
+
+# ===== 运行时数据（隐私）=====
+logs/
+storage/
+release/
+dist-*/
+_backup_*/
+flutter_app_temp/
+
+# ===== 编辑器/系统 =====
+.vscode/
+.DS_Store
+Thumbs.db

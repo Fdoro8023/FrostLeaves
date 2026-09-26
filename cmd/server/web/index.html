@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frost Leaves - 私有网盘</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a1a; color: #e0e0e0; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #2d2d2d; padding: 16px 24px; border-radius: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 20px; color: #8b5cf6; }
+        .status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+        .status-dot.disconnected { background: #ef4444; }
+        .nav { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        .nav-btn { padding: 12px 24px; background: #2d2d2d; border: none; border-radius: 8px; color: #e0e0e0; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .nav-btn:hover { background: #3d3d3d; }
+        .nav-btn.active { background: #8b5cf6; }
+        .card { background: #2d2d2d; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #e0e0e0; }
+        .connect-form { display: flex; gap: 12px; align-items: center; }
+        .input { flex: 1; padding: 12px 16px; background: #1a1a1a; border: 1px solid #3d3d3d; border-radius: 8px; color: #e0e0e0; font-size: 14px; }
+        .input:focus { outline: none; border-color: #8b5cf6; }
+        .btn { padding: 12px 24px; background: #8b5cf6; border: none; border-radius: 8px; color: white; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+        .btn:hover { background: #7c3aed; }
+        .btn-secondary { background: #3d3d3d; }
+        .btn-secondary:hover { background: #4d4d4d; }
+        .btn-danger { background: #ef4444; }
+        .btn-danger:hover { background: #dc2626; }
+        .file-list { display: flex; flex-direction: column; gap: 8px; }
+        .file-item { display: flex; align-items: center; padding: 12px 16px; background: #1a1a1a; border-radius: 8px; gap: 12px; }
+        .file-icon { font-size: 20px; }
+        .file-info { flex: 1; min-width: 0; }
+        .file-name { font-size: 14px; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-size { font-size: 12px; color: #888; margin-top: 2px; }
+        .file-actions { display: flex; gap: 8px; }
+        .icon-btn { padding: 8px 12px; background: transparent; border: none; color: #a78bfa; cursor: pointer; border-radius: 6px; transition: all 0.2s; font-size: 13px; }
+        .icon-btn:hover { background: #3d3d3d; color: #e0e0e0; }
+        .empty-state { text-align: center; padding: 48px 24px; color: #888; }
+        .task-list { display: flex; flex-direction: column; gap: 8px; }
+        .task-item { padding: 12px 16px; background: #1a1a1a; border-radius: 8px; }
+        .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .task-name { font-size: 14px; color: #e0e0e0; }
+        .task-status { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
+        .task-status.uploading, .task-status.downloading { background: #3b82f6; color: white; }
+        .task-status.completed { background: #10b981; color: white; }
+        .task-status.failed { background: #ef4444; color: white; }
+        .progress-bar { height: 4px; background: #3d3d3d; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #8b5cf6; transition: width 0.3s; }
+        .task-info { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-top: 8px; }
+        .toast { position: fixed; bottom: 24px; right: 24px; padding: 16px 24px; background: #2d2d2d; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 12px; z-index: 2000; }
+        .toast.success { border-left: 4px solid #10b981; }
+        .toast.error { border-left: 4px solid #ef4444; }
+        .hidden { display: none !important; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: #2d2d2d; border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; }
+        .modal-title { font-size: 18px; margin-bottom: 16px; color: #e0e0e0; }
+        .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; background: #3d3d3d; color: #c4b5fd; margin-left: 8px; }
+        .guest-meta { font-size: 13px; color: #9ca3af; margin-top: 8px; line-height: 1.7; }
+        .path-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .path-text { font-size: 13px; color: #9ca3af; word-break: break-all; }
+        .hint { font-size: 12px; color: #6b7280; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Frost Leaves</h1>
+            <div class="status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+
+        <!-- ========== 访客分享视图（/s/{code}） ========== -->
+        <div id="guestPage" class="hidden">
+            <div class="card">
+                <h2 class="card-title" id="guestTitle">文件分享</h2>
+                <div class="guest-meta" id="guestMeta"></div>
+            </div>
+            <div class="card">
+                <div class="path-bar">
+                    <button class="btn btn-secondary" id="guestUpBtn" onclick="guestGoUp()">返回上级</button>
+                    <span class="path-text" id="guestPathText">/</span>
+                </div>
+                <div id="guestList" class="file-list"></div>
+                <div id="guestEmpty" class="empty-state hidden"><p>这个位置还没有文件</p></div>
+            </div>
+            <div class="card hidden" id="guestUploadCard">
+                <h3 class="card-title">上传文件到此处</h3>
+                <button class="btn" onclick="guestUpload()">选择文件</button>
+                <div class="hint">上传的文件会出现在上面列表中（同名文件不会覆盖）。</div>
+            </div>
+        </div>
+
+        <!-- ========== 连接页 ========== -->
+        <!-- ========== 访客入口（公网/非本机访问时显示） ========== -->
+        <div id="guestEntryPage" class="card hidden">
+            <h2 class="card-title">访客访问</h2>
+            <div class="hint">请直接打开朋友发给你的分享链接（形如 <b>/s/XXXXXXXXXX</b>）即可查看与下载文件。</div>
+        </div>
+
+        <div id="connectPage" class="card">
+            <h2 class="card-title">连接到服务器</h2>
+            <div class="connect-form">
+                <input type="text" class="input" id="serverUrl" placeholder="输入服务器地址 (例如: http://192.168.1.100:9091)">
+                <button class="btn" onclick="connect()">连接</button>
+            </div>
+            <div class="hint">连接后需要在服务端（桌面端「设备管理」）审批，并输入生成的 8 位验证码。</div>
+        </div>
+
+        <div class="nav hidden" id="mainNav">
+            <button class="nav-btn active" data-page="files" onclick="showPage('files')">文件管理</button>
+            <button class="nav-btn" data-page="settings" onclick="showPage('settings')">设置</button>
+        </div>
+
+        <div id="filesPage" class="hidden">
+            <div class="card">
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <button class="btn btn-secondary" onclick="goUp()">上级</button>
+                    <input type="text" class="input" id="currentPath" value="/shared" readonly>
+                    <button class="btn btn-secondary" onclick="loadFiles()">刷新</button>
+                </div>
+                <div class="nav" style="margin-top: 12px; margin-bottom: 0;">
+                    <button class="nav-btn" onclick="navigateTo('/shared')">共享</button>
+                    <button class="nav-btn" onclick="navigateTo('/private')">私人</button>
+                    <button class="nav-btn" onclick="createFolder()">新建文件夹</button>
+                    <button class="nav-btn" onclick="uploadFile()">上传</button>
+                </div>
+            </div>
+            <div id="tasksSection" class="card hidden">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h3 class="card-title" style="margin: 0;">传输任务</h3>
+                    <button class="btn btn-secondary" onclick="clearTasks()">清空</button>
+                </div>
+                <div class="task-list" id="taskList"></div>
+            </div>
+            <div class="card">
+                <div id="fileList" class="file-list"></div>
+                <div id="emptyState" class="empty-state hidden">
+                    <p>空目录</p>
+                    <button class="btn" onclick="uploadFile()" style="margin-top: 16px;">上传文件</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="settingsPage" class="hidden">
+            <div class="card">
+                <h3 class="card-title">设置</h3>
+                <div class="hint" style="margin-bottom: 16px;">当前设备 ID：<span id="settingsDeviceId">-</span></div>
+                <button class="btn btn-danger" onclick="disconnect()">断开连接</button>
+            </div>
+        </div>
+    </div>
+    <div id="toastContainer"></div>
+    <script>
+        // ============ 通用 ============
+        let serverUrl = '', fileGatewayUrl = '', authToken = '', deviceId = '';
+        let currentPath = '/shared', files = [], tasks = [], taskIdCounter = 0;
+
+        // 访客模式
+        let shareCode = '', guestPath = '', guestPerm = 'read';
+
+        function getFileGatewayUrl(authUrl) {
+            try {
+                const url = new URL(authUrl);
+                const port = parseInt(url.port);
+                if (port > 1) { url.port = (port - 1).toString(); }
+                return url.origin;
+            } catch (e) { return authUrl; }
+        }
+
+        // 后端文件网关返回的是裸对象（{items:[...]}），部分接口返回 {code,msg,data}；这里统一兼容
+        function unwrap(payload) {
+            if (payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'code')) {
+                return { ok: payload.code === 0, msg: payload.msg || '', data: payload.data || {}, raw: payload };
+            }
+            return { ok: true, msg: '', data: payload || {}, raw: payload || {} };
+        }
+
+        function authHeaders() {
+            const h = {};
+            if (deviceId) h['X-Device-Id'] = deviceId;
+            if (authToken) h['X-Device-Token'] = authToken;
+            return h;
+        }
+
+        function formatSize(bytes) {
+            bytes = Number(bytes) || 0;
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function showToast(message, type) {
+            type = type || 'success';
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
+        }
+
+        // ============ 入口 ============
+        function init() {
+            const m = location.pathname.match(/^\/s\/([A-Za-z0-9]+)/);
+            if (m) { shareCode = m[1]; startGuestMode(); return; }
+
+            // 公网/非本机访问：默认按访客处理，避免在访客设备上误入设备配对流程
+            if (!isPrivateHost()) {
+                document.getElementById('connectPage').classList.add('hidden');
+                document.getElementById('guestEntryPage').classList.remove('hidden');
+                document.getElementById('statusText').textContent = '访客模式';
+                document.getElementById('statusDot').classList.remove('disconnected');
+                return;
+            }
+
+            const saved = localStorage.getItem('frostLeavesConfig');
+            if (saved) {
+                try {
+                    const config = JSON.parse(saved);
+                    serverUrl = config.serverUrl || '';
+                    fileGatewayUrl = config.fileGatewayUrl || getFileGatewayUrl(serverUrl);
+                    authToken = config.authToken || '';
+                    deviceId = config.deviceId || '';
+                    if (serverUrl && !/^https?:\/\//.test(serverUrl)) {
+                        serverUrl = 'http://' + serverUrl;
+                        fileGatewayUrl = getFileGatewayUrl(serverUrl);
+                    }
+                    document.getElementById('serverUrl').value = serverUrl;
+                    if (authToken) { showMainUI(); loadFiles(); }
+                } catch (e) { localStorage.removeItem('frostLeavesConfig'); }
+            }
+        }
+
+        /// 是否从本机/局域网访问（否则视为访客通道）
+        function isPrivateHost() {
+            const h = location.hostname;
+            if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+            if (h.endsWith('.local')) return true;
+            if (/^10\./.test(h)) return true;
+            if (/^192\.168\./.test(h)) return true;
+            if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(h)) return true;
+            return false;
+        }
+
+        function saveConfig() {
+            localStorage.setItem('frostLeavesConfig', JSON.stringify({
+                serverUrl: serverUrl, fileGatewayUrl: fileGatewayUrl, authToken: authToken, deviceId: deviceId
+            }));
+        }
+
+        // ============ 访客模式 ============
+        function startGuestMode() {
+            document.getElementById('connectPage').classList.add('hidden');
+            document.getElementById('guestPage').classList.remove('hidden');
+            document.getElementById('statusText').textContent = '访客模式';
+            document.getElementById('statusDot').classList.remove('disconnected');
+            document.getElementById('settingsDeviceId').textContent = '-';
+            guestLoad('');
+        }
+
+        function guestApi(path) {
+            // 同源访问：服务端把 /api/v1/share/* 反代到文件网关，便于单端口对外（隧道）
+            return location.origin + '/api/v1/share/' + shareCode + path;
+        }
+
+        async function guestLoad(path) {
+            try {
+                const resp = await fetch(guestApi('?path=' + encodeURIComponent(path)));
+                const payload = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(payload.error || ('加载失败 (HTTP ' + resp.status + ')'), 'error');
+                    document.getElementById('guestMeta').textContent = payload.error || '分享不可用';
+                    return;
+                }
+                guestPath = path || '';
+                guestPerm = (payload.share && payload.share.perm) || 'read';
+
+                const note = (payload.share && payload.share.note) ? payload.share.note : '有人给你分享了一些文件';
+                const exp = payload.share && payload.share.expires_at;
+                let expText = '长期有效';
+                if (exp && !/^0001-01-01/.test(exp)) {
+                    const d = new Date(exp);
+                    if (!isNaN(d.getTime())) expText = '有效期至 ' + d.toLocaleString();
+                }
+                const permText = guestPerm === 'read' ? '只读' : (guestPerm === 'upload' ? '只读 + 可上传' : '可读写');
+                document.getElementById('guestTitle').textContent = note;
+                document.getElementById('guestMeta').innerHTML =
+                    '权限：' + escapeHtml(permText) + '<span class="badge">' + escapeHtml(expText) + '</span>';
+                document.getElementById('guestPathText').textContent = '/' + guestPath;
+                document.getElementById('guestUpBtn').style.display = guestPath ? 'inline-block' : 'none';
+                document.getElementById('guestUploadCard').classList.toggle('hidden', guestPerm === 'read');
+
+                renderGuestFiles(payload.items || []);
+            } catch (e) {
+                showToast('加载失败：' + e.message, 'error');
+            }
+        }
+
+        function renderGuestFiles(items) {
+            const list = document.getElementById('guestList');
+            const empty = document.getElementById('guestEmpty');
+            if (!items.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            list.innerHTML = items.map(function (f) {
+                const isDir = f.type === 'directory';
+                const full = guestPath ? (guestPath + '/' + f.name) : f.name;
+                const href = guestApi('/download?path=' + encodeURIComponent(full));
+                return '<div class="file-item">' +
+                    '<span class="file-icon">' + (isDir ? 'DIR' : 'FILE') + '</span>' +
+                    '<div class="file-info"><div class="file-name">' + escapeHtml(f.name) + '</div>' +
+                    '<div class="file-size">' + (isDir ? '目录' : formatSize(f.size)) + ' · ' + escapeHtml(f.modified || '') + '</div></div>' +
+                    '<div class="file-actions">' +
+                    (isDir
+                        ? '<button class="icon-btn" onclick="guestLoad(\'' + full.replace(/'/g, "\\'") + '\')">打开</button>'
+                        : '<a class="icon-btn" href="' + href + '" download>下载</a>') +
+                    '</div></div>';
+            }).join('');
+        }
+
+        function guestGoUp() {
+            const parts = guestPath.split('/').filter(p => p);
+            parts.pop();
+            guestLoad(parts.join('/'));
+        }
+
+        function guestUpload() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = async function (e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const taskId = ++taskIdCounter;
+                addTask(taskId, 'upload', file.name, file.size);
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', guestApi('/upload?path=' + encodeURIComponent(guestPath)));
+                    xhr.upload.onprogress = function (ev) {
+                        if (ev.lengthComputable) updateTaskProgress(taskId, ev.loaded / ev.total, ev.loaded);
+                    };
+                    xhr.onload = function () {
+                        let ok = false, msg = '';
+                        try {
+                            const r = JSON.parse(xhr.responseText);
+                            ok = (xhr.status === 200);
+                            msg = r.error || r.msg || '';
+                        } catch (err) { msg = 'HTTP ' + xhr.status; }
+                        if (ok) {
+                            completeTask(taskId); guestLoad(guestPath); showToast('上传成功', 'success');
+                        } else { failTask(taskId, msg || '上传失败'); }
+                    };
+                    xhr.onerror = function () { failTask(taskId, '网络错误'); };
+                    xhr.send(formData);
+                } catch (err) { failTask(taskId, err.message); }
+            };
+            input.click();
+        }
+
+        // ============ 设备模式：连接与配对 ============
+        async function connect() {
+            let url = document.getElementById('serverUrl').value.trim();
+            if (!url) { showToast('请输入服务器地址', 'error'); return; }
+            if (!/^https?:\/\//.test(url)) { url = 'http://' + url; }
+            serverUrl = url.replace(/\/+$/, '');
+            fileGatewayUrl = getFileGatewayUrl(serverUrl);
+            deviceId = 'web-' + Math.random().toString(36).substr(2, 9);
+            try {
+                const resp = await fetch(serverUrl + '/api/v1/device/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, device_name: 'Web Client', platform: 'web' })
+                });
+                const data = await resp.json();
+                if (data.code === 0) {
+                    showToast('已发送连接请求，请在服务端审批', 'success');
+                    showVerificationDialog();
+                } else {
+                    showToast(data.msg || data.error || '连接失败', 'error');
+                }
+            } catch (e) { showToast('连接失败：' + e.message, 'error'); }
+        }
+
+        function showVerificationDialog() {
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.id = 'verifyModal';
+            modal.innerHTML = '<div class="modal-content"><h3 class="modal-title">输入验证码</h3>' +
+                '<p style="margin-bottom:16px;color:#888;font-size:14px;">请在服务端审批后，把生成的 8 位验证码填到下面：</p>' +
+                '<input type="text" class="input" id="verifyCodeInput" placeholder="输入验证码" style="width:100%;margin-bottom:16px;">' +
+                '<div class="modal-actions"><button class="btn btn-secondary" onclick="closeVerificationDialog()">取消</button>' +
+                '<button class="btn" onclick="submitVerificationCode()">验证</button></div></div>';
+            document.body.appendChild(modal);
+            document.getElementById('verifyCodeInput').focus();
+        }
+
+        function closeVerificationDialog() {
+            const modal = document.getElementById('verifyModal');
+            if (modal) modal.remove();
+        }
+
+        async function submitVerificationCode() {
+            const code = document.getElementById('verifyCodeInput').value.trim();
+            if (!code) { showToast('请输入验证码', 'error'); return; }
+            try {
+                const resp = await fetch(serverUrl + '/api/v1/device/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, code: code })
+                });
+                const data = await resp.json();
+                if (data.code === 0) {
+                    authToken = data.data.token;
+                    saveConfig();
+                    closeVerificationDialog();
+                    showMainUI();
+                    loadFiles();
+                    showToast('连接成功', 'success');
+                } else {
+                    showToast('验证失败：' + (data.msg || data.error || '验证码错误'), 'error');
+                }
+            } catch (e) { showToast('验证失败：' + e.message, 'error'); }
+        }
+
+        function showMainUI() {
+            document.getElementById('connectPage').classList.add('hidden');
+            document.getElementById('guestPage').classList.add('hidden');
+            document.getElementById('mainNav').classList.remove('hidden');
+            document.getElementById('filesPage').classList.remove('hidden');
+            document.getElementById('statusDot').classList.remove('disconnected');
+            document.getElementById('statusText').textContent = '已连接';
+            document.getElementById('settingsDeviceId').textContent = deviceId || '-';
+        }
+
+        function disconnect() {
+            authToken = ''; deviceId = '';
+            localStorage.removeItem('frostLeavesConfig');
+            location.reload();
+        }
+
+        function showPage(page) {
+            document.querySelectorAll('.nav-btn[data-page]').forEach(function (b) { b.classList.remove('active'); });
+            const btn = document.querySelector('.nav-btn[data-page="' + page + '"]');
+            if (btn) btn.classList.add('active');
+            document.getElementById('filesPage').classList.add('hidden');
+            document.getElementById('settingsPage').classList.add('hidden');
+            if (page === 'files') document.getElementById('filesPage').classList.remove('hidden');
+            else if (page === 'settings') document.getElementById('settingsPage').classList.remove('hidden');
+        }
+
+        // ============ 设备模式：文件操作 ============
+        async function loadFiles() {
+            try {
+                const resp = await fetch(fileGatewayUrl + '/api/v1/files/list?path=' + encodeURIComponent(currentPath), { headers: authHeaders() });
+                const payload = await resp.json().catch(() => ({}));
+                if (!resp.ok) { showToast('加载失败：' + (payload.error || ('HTTP ' + resp.status)), 'error'); return; }
+                const r = unwrap(payload);
+                files = (r.data && r.data.items) || payload.items || [];
+                renderFiles();
+            } catch (e) { showToast('加载失败：' + e.message, 'error'); }
+        }
+
+        function renderFiles() {
+            const list = document.getElementById('fileList');
+            const empty = document.getElementById('emptyState');
+            if (!files.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+            list.innerHTML = files.map(function (file) {
+                const isDir = file.type === 'directory' || file.is_directory === true;
+                const name = escapeHtml(file.name);
+                const jsName = String(file.name).replace(/'/g, "\\'");
+                return '<div class="file-item">' +
+                    '<span class="file-icon">' + (isDir ? 'DIR' : 'FILE') + '</span>' +
+                    '<div class="file-info"><div class="file-name">' + name + '</div>' +
+                    '<div class="file-size">' + (isDir ? '目录' : formatSize(file.size)) + ' · ' + escapeHtml(file.modified || '') + '</div></div>' +
+                    '<div class="file-actions">' +
+                    (isDir
+                        ? '<button class="icon-btn" onclick="navigateTo(\'' + (currentPath === '/' ? '' : currentPath) + '/' + jsName + '\')">打开</button>'
+                        : '<button class="icon-btn" onclick="downloadFile(\'' + jsName + '\')">下载</button>') +
+                    '<button class="icon-btn" onclick="deleteFile(\'' + jsName + '\')">删除</button>' +
+                    '</div></div>';
+            }).join('');
+        }
+
+        function navigateTo(path) {
+            currentPath = path.replace(/\/+/g, '/');
+            document.getElementById('currentPath').value = currentPath;
+            loadFiles();
+        }
+
+        function goUp() {
+            const parts = currentPath.split('/').filter(p => p);
+            if (parts.length > 1) { parts.pop(); navigateTo('/' + parts.join('/')); }
+        }
+
+        function uploadFile() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = function (e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const taskId = ++taskIdCounter;
+                addTask(taskId, 'upload', file.name, file.size);
+                const formData = new FormData();
+                formData.append('file', file);
+                const xhr = new XMLHttpRequest();
+                const target = (currentPath === '/' ? '' : currentPath) + '/' + file.name;
+                xhr.open('POST', fileGatewayUrl + '/api/v1/files/upload?path=' + encodeURIComponent(target));
+                const h = authHeaders();
+                Object.keys(h).forEach(function (k) { xhr.setRequestHeader(k, h[k]); });
+                xhr.upload.onprogress = function (ev) {
+                    if (ev.lengthComputable) updateTaskProgress(taskId, ev.loaded / ev.total, ev.loaded);
+                };
+                xhr.onload = function () {
+                    if (xhr.status === 200) { completeTask(taskId); loadFiles(); showToast('上传成功', 'success'); }
+                    else { failTask(taskId, '上传失败 (HTTP ' + xhr.status + ')'); }
+                };
+                xhr.onerror = function () { failTask(taskId, '网络错误'); };
+                xhr.send(formData);
+            };
+            input.click();
+        }
+
+        async function downloadFile(name) {
+            const taskId = ++taskIdCounter;
+            addTask(taskId, 'download', name, 0);
+            const full = (currentPath === '/' ? '' : currentPath) + '/' + name;
+            try {
+                const resp = await fetch(fileGatewayUrl + '/api/v1/files/download?path=' + encodeURIComponent(full), { headers: authHeaders() });
+                if (!resp.ok) { failTask(taskId, '下载失败 (HTTP ' + resp.status + ')'); return; }
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = name; a.click();
+                window.URL.revokeObjectURL(url);
+                completeTask(taskId);
+                showToast('下载成功', 'success');
+            } catch (e) { failTask(taskId, e.message); }
+        }
+
+        async function createFolder() {
+            const name = prompt('请输入文件夹名称：');
+            if (!name) return;
+            try {
+                const resp = await fetch(fileGatewayUrl + '/api/v1/files/mkdir', {
+                    method: 'POST',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+                    body: JSON.stringify({ path: currentPath + '/' + name })
+                });
+                const payload = await resp.json().catch(() => ({}));
+                if (resp.ok) { loadFiles(); showToast('创建成功', 'success'); }
+                else { showToast('创建失败：' + (payload.error || ('HTTP ' + resp.status)), 'error'); }
+            } catch (e) { showToast('创建失败：' + e.message, 'error'); }
+        }
+
+        async function deleteFile(name) {
+            if (!confirm('确定要删除 ' + name + ' 吗？')) return;
+            try {
+                const resp = await fetch(fileGatewayUrl + '/api/v1/files/delete', {
+                    method: 'DELETE',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+                    body: JSON.stringify({ paths: [(currentPath === '/' ? '' : currentPath) + '/' + name] })
+                });
+                const payload = await resp.json().catch(() => ({}));
+                if (resp.ok) { loadFiles(); showToast('已移入回收站', 'success'); }
+                else { showToast('删除失败：' + (payload.error || ('HTTP ' + resp.status)), 'error'); }
+            } catch (e) { showToast('删除失败：' + e.message, 'error'); }
+        }
+
+        // ============ 传输任务 ============
+        function addTask(id, type, fileName, size) {
+            tasks.push({ id: id, type: type, fileName: fileName, size: size, progress: 0, speed: 0, status: type === 'upload' ? 'uploading' : 'downloading', startTime: Date.now() });
+            renderTasks();
+        }
+
+        function updateTaskProgress(id, progress, received) {
+            const task = tasks.find(t => t.id === id);
+            if (task) {
+                task.progress = progress;
+                const elapsed = (Date.now() - task.startTime) / 1000;
+                task.speed = elapsed > 0 ? received / elapsed : 0;
+                renderTasks();
+            }
+        }
+
+        function completeTask(id) { const t = tasks.find(x => x.id === id); if (t) { t.status = 'completed'; t.progress = 1; renderTasks(); } }
+        function failTask(id, error) { const t = tasks.find(x => x.id === id); if (t) { t.status = 'failed'; t.error = error; renderTasks(); showToast(error, 'error'); } }
+        function clearTasks() { tasks = []; renderTasks(); }
+
+        function renderTasks() {
+            const section = document.getElementById('tasksSection');
+            const list = document.getElementById('taskList');
+            if (!section || !list) return;
+            if (!tasks.length) { section.classList.add('hidden'); return; }
+            section.classList.remove('hidden');
+            list.innerHTML = tasks.map(function (task) {
+                return '<div class="task-item"><div class="task-header"><span class="task-name">#' + task.id + ' ' + escapeHtml(task.fileName) + '</span>' +
+                    '<span class="task-status ' + task.status + '">' + getStatusText(task.status) + '</span></div>' +
+                    '<div class="progress-bar"><div class="progress-fill" style="width: ' + (task.progress * 100).toFixed(1) + '%"></div></div>' +
+                    '<div class="task-info"><span>' + (task.progress * 100).toFixed(1) + '%</span>' +
+                    '<span>' + formatSpeed(task.speed) + '</span>' +
+                    '<span>' + formatSize(task.size * task.progress) + ' / ' + formatSize(task.size) + '</span></div></div>';
+            }).join('');
+        }
+
+        function getStatusText(status) {
+            return { 'uploading': '上传中', 'downloading': '下载中', 'completed': '已完成', 'failed': '失败' }[status] || status;
+        }
+
+        function formatSpeed(bytesPerSec) {
+            bytesPerSec = Number(bytesPerSec) || 0;
+            if (bytesPerSec < 1024) return bytesPerSec.toFixed(0) + ' B/s';
+            if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
+            return (bytesPerSec / (1024 * 1024)).toFixed(1) + ' MB/s';
+        }
+
+        init();
+    </script>
+</body>
+</html>

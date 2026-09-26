@@ -1,0 +1,592 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../services/local_storage_service.dart';
+
+/// 轻量国际化：中文（默认）/ 英文。
+/// 用法：t('刷新') —— 英文模式查字典，查不到回退中文，未覆盖的文案不会崩。
+class L {
+  static bool _en = false;
+  static bool get isEn => _en;
+  static void apply({required bool en}) => _en = en;
+}
+
+final Map<String, String> _tCache = <String, String>{};
+
+/// 取词：① 精确命中 ② 模板匹配（把 $x / ${...} 当占位符，解决“插值后传参”导致失配）③ 回退中文
+String t(String zh) {
+  if (!L.isEn) return zh;
+  final exact = _en[zh];
+  if (exact != null) return exact;
+  final cached = _tCache[zh];
+  if (cached != null) return cached;
+  for (final tpl in _templates) {
+    final m = tpl.re.firstMatch(zh);
+    if (m == null) continue;
+    var i = 1;
+    final out = tpl.en.replaceAllMapped(
+      RegExp(r'\$[A-Za-z_][A-Za-z0-9_.]*|\$\{[^}]*\}'),
+      (mm) {
+        final v = i <= m.groupCount ? (m.group(i) ?? '') : (mm.group(0) ?? '');
+        i++;
+        // 捕获到的值本身可能也是界面文案（如“可用”），再查一次精确表
+        return _en[v] ?? v;
+      },
+    );
+    _tCache[zh] = out;
+    return out;
+  }
+  return zh;
+}
+
+class _Template {
+  final RegExp re;
+  final String en;
+  const _Template(this.re, this.en);
+}
+
+/// 把模板键按占位符切成片段，占位符用 \u0000 标记
+List<String> _splitTemplate(String key) {
+  final parts = <String>[];
+  final re = RegExp(r'\$[A-Za-z_][A-Za-z0-9_.]*|\$\{[^}]*\}');
+  var last = 0;
+  for (final m in re.allMatches(key)) {
+    if (m.start > last) parts.add(key.substring(last, m.start));
+    parts.add('\u0000');
+    last = m.end;
+  }
+  if (last < key.length) parts.add(key.substring(last));
+  return parts;
+}
+
+List<_Template> _buildTemplates() {
+  final list = <_Template>[];
+  for (final e in _en.entries) {
+    if (!e.key.contains(r'$')) continue;
+    final buf = StringBuffer('^');
+    for (final part in _splitTemplate(e.key)) {
+      if (part == '\u0000') {
+        buf.write('(.*?)');
+      } else {
+        buf.write(RegExp.escape(part));
+      }
+    }
+    buf.write(r'$');
+    list.add(_Template(RegExp(buf.toString(), dotAll: true), e.value));
+  }
+  list.sort((a, b) => b.re.pattern.length.compareTo(a.re.pattern.length));
+  return list;
+}
+
+final List<_Template> _templates = _buildTemplates();
+
+/// 语言设置（默认中文）
+final languageProvider = StateProvider<bool>((ref) => false); // true = English
+
+Future<bool> readSavedEnglish() async {
+  final v = await localStorageService.getLanguage();
+  return v == 'en';
+}
+
+Future<void> persistEnglish(bool en) async {
+  await localStorageService.saveLanguage(en ? 'en' : 'zh');
+}
+
+const Map<String, String> _en = <String, String>{
+  // ===== 通用 =====
+
+  r'取消': r'Cancel',
+  r'删除': r'Delete',
+  r'刷新': r'Refresh',
+  r'关闭': r'Close',
+  r'复制': r'Copy',
+  r'创建': r'Create',
+  r'确定': r'OK',
+  r'保存': r'Save',
+  r'保存配置': r'Save config',
+  r'同意': r'Agree',
+  r'拒绝': r'Reject',
+  r'全选': r'Select all',
+  r'取消选择': r'Clear selection',
+  r'搜索': r'Search',
+  r'上传': r'Upload',
+  r'下载': r'Download',
+  r'分享': r'Share',
+  r'还原': r'Restore',
+  r'清空': r'Clear',
+  r'空闲': r'Idle',
+  r'永久': r'Permanent',
+  r'永久删除': r'Delete permanently',
+  r'有效': r'Valid',
+  r'有效期': r'Expires',
+  r'备注（可选）': r'Note (optional)',
+  r'目录': r'Folder',
+  r'端口': r'Port',
+  r'状态': r'Status',
+  r'权限': r'Permission',
+  r'加载中...': r'Loading...',
+  r'空目录': r'Empty folder',
+  r'操作': r'Actions',
+  r'平台': r'Platform',
+  r'型号': r'Model',
+  r'最近活跃': r'Last seen',
+  r'创建时间': r'Created',
+  // ===== 导航与页面 =====
+
+  r'首页': r'Home',
+  r'返回首页': r'Back to home',
+  r'文件': r'Files',
+  r'文件管理': r'Files',
+  r'设备管理': r'Devices',
+  r'审计日志': r'Audit log',
+  r'分享管理': r'Shares',
+  r'系统配置': r'System config',
+  r'设置': r'Settings',
+  r'仪表盘': r'Dashboard',
+  r'连接': r'Connect',
+  r'关于': r'About',
+  r'外观': r'Appearance',
+  r'外观（深色 / 浅色 / 跟随系统）': r'Appearance (dark / light / system)',
+  // ===== 主题 =====
+
+  r'深色': r'Dark',
+  r'浅色': r'Light',
+  r'跟随系统': r'System',
+  // ===== 连接状态 =====
+
+  r'已连接': r'Connected',
+  r'未连接': r'Not connected',
+  r'已断开': r'Disconnected',
+  r'无法连接服务端': r'Cannot connect to the server',
+  r'连接已断开': r'Connection lost',
+  r'刷新成功': r'Refreshed',
+  r'刷新失败': r'Refresh failed',
+  r'状态已更新': r'Status updated',
+  r'已被服务端断开连接': r'Disconnected by the server',
+  r'已被服务端拉黑，无法继续连接': r'Blocked by the server; cannot reconnect',
+  r'服务端已无此设备，请重新申请连接': r'This device is no longer on the server; please request again',
+  r'请求连接中...': r'Requesting...',
+  r'等待管理员批准': r'Waiting for approval',
+  r'请输入验证码': r'Enter the verification code',
+  r'请输入服务端地址': r'Enter the server address',
+  r'服务端地址': r'Server address',
+  r'服务端地址已保存': r'Server address saved',
+  r'服务端名称': r'Server name',
+  r'验证码': r'Verification code',
+  r'发起连接申请': r'Request connection',
+  r'退出服务器': r'Leave server',
+  r'生成日志': r'Generate logs',
+  r'已退出服务器': r'Left the server',
+  r'已在本地退出': r'Left locally',
+  r'服务端已移除本设备，可重新申请连接': r'The server removed this device; you can request again',
+  r'未能通知服务端，服务端可能仍显示在线；请稍后重试或让管理员踢出': r'The server was not notified and may still show it online; retry later or ask the admin to kick it',
+  // ===== 设备管理 =====
+
+  r'待审核': r'Pending',
+  r'已拒绝/拉黑': r'Rejected / Blocked',
+  r'踢出': r'Kick',
+  r'拉黑': r'Block',
+  r'解除': r'Unblock',
+  r'已拒绝': r'Rejected',
+  r'已拉黑': r'Blocked',
+  r'暂无设备': r'No devices',
+  r'读取失败：': r'Load failed: ',
+  // ===== 文件与分享 =====
+
+  r'新建文件夹': r'New folder',
+  r'上传文件': r'Upload file',
+  r'上传到此目录': r'Upload here',
+  r'上传完成': r'Upload complete',
+  r'上传失败': r'Upload failed',
+  r'下载失败': r'Download failed',
+  r'删除失败': r'Delete failed',
+  r'重命名成功': r'Renamed',
+  r'重命名': r'Rename',
+  r'批量删除': r'Delete selected',
+  r'确认删除': r'Confirm delete',
+  r'已移入回收站': r'Moved to recycle bin',
+  r'回收站': r'Recycle bin',
+  r'清空回收站': r'Empty recycle bin',
+  r'共享': r'Shared',
+  r'公共': r'Public',
+  r'公共文件': r'Public files',
+  r'创建分享': r'Create share',
+  r'新建分享': r'New share',
+  r'分享已创建': r'Share created',
+  r'复制链接': r'Copy link',
+  r'吊销': r'Revoke',
+  r'已吊销': r'Revoked',
+  r'只读（可下载）': r'Read-only (download)',
+  r'只读 + 可上传': r'Read-only + upload',
+  r'1 小时': r'1 hour',
+  r'24 小时': r'24 hours',
+  r'7 天': r'7 days',
+  // ===== 关于 =====
+
+  r'关于 Frost Leaves': r'About Frost Leaves',
+  r'关于反馈': r'About feedback',
+  r'运行状态': r'Runtime',
+  r'版本信息': r'Version',
+  r'客户端版本': r'Client version',
+  r'服务端版本': r'Server version',
+  r'运行平台': r'Platform',
+  r'文件传输加密': r'File transfer encryption',
+  r'开发者信息': r'Developer',
+  r'开发者：霜叶  2726895865@qq.com': r'Developer: Suanye  2726895865@qq.com',
+  r'本机设备标识': r'Local device ID',
+  r'组网方式': r'Networking',
+  r'连接状态': r'Connection',
+  r'遇到 bug？联系我们': r'Found a bug? Contact us',
+  r'点此查看运行状态 / 版本信息 / 开发者信息': r'Tap for runtime / version / developer info',
+  r'私有组网网盘 · 基于开源组件构建': r'Private mesh drive · built on open-source components',
+  r'本软件以 PolyForm Noncommercial 1.0.0 发布（禁止商用）；第三方组件遵循各自开源协议': r'This software is released under PolyForm Noncommercial 1.0.0 (noncommercial use only); third-party components follow their own licenses',
+  // ===== 审计日志 =====
+
+  r'全部': r'All',
+  r'成功': r'Success',
+  r'失败': r'Failed',
+  r'被拒绝': r'Denied',
+  r'暂无日志': r'No logs',
+  // ===== 客户端补充（第二批）=====\n
+  r'${paths.length} 个文件已移入回收站': r'${paths.length} file(s) moved to the recycle bin',
+  r'=== Frost Leaves 客户端日志 ===': r'=== Frost Leaves client log ===',
+  r'=== 连接信息 ===': r'=== Connection ===',
+  r'=== 连接状态 ===': r'=== Connection state ===',
+  r'=== 设备信息 ===': r'=== Device ===',
+  r'=== 最近错误 ===': r'=== Recent errors ===',
+  r'8 位验证码': r'8-digit code',
+  r'Frost Leaves 客户端日志': r'Frost Leaves client log',
+  r'FrostLeaves 用户许可协议（摘要）': r'FrostLeaves License Agreement (Summary)',
+  r'HTTPS (TLS)，由本软件内置实现': r'HTTPS (TLS), built into the app',
+  r'部分失败': r'Partially failed',
+  r'成功 $ok 个，失败 ${failed.length} 个': r'$ok succeeded, ${failed.length} failed',
+  r'传输任务': r'Transfers',
+  r'创建成功': r'Created',
+  r'创建分享失败': r'Failed to create share',
+  r'创建失败': r'Create failed',
+  r'当前平台: ${Platform.operatingSystem}': r'Platform: ${Platform.operatingSystem}',
+  r'当前未连接': r'Not connected',
+  r'当前状态：$_state': r'State: $_state',
+  r'等待管理员审批': r'Waiting for admin approval',
+  r'等待管理员审批...': r'Waiting for admin approval...',
+  r'点对点私有组网（本机已安装的第三方组网客户端）': r'Peer-to-peer private mesh (third-party client already installed)',
+  r'多选': r'Select',
+  r'分享选中的 ${_selected.length} 个文件': r'Share ${_selected.length} selected file(s)',
+  r'服务端地址：${api.authUrl}': r'Server address: ${api.authUrl}',
+  r'服务端名称：$_serverName': r'Server name: $_serverName',
+  r'服务端未返回状态': r'The server returned no status',
+  r'服务器': r'Server',
+  r'服务器地址': r'Server address',
+  r'服务器名称': r'Server name',
+  r'管理设备、审核入网、配置存储': r'Manage devices, approve access, configure storage',
+  r'还原成功': r'Restored',
+  r'还原失败: $e': r'Restore failed: $e',
+  r'还原文件': r'Restore file',
+  r'回收站为空': r'Recycle bin is empty',
+  r'回收站已清空': r'Recycle bin emptied',
+  r'加载失败': r'Load failed',
+  r'加载失败: $e': r'Load failed: $e',
+  r'进行中': r'In progress',
+  '连接被服务端关闭\n请检查服务端是否正常运行': 'Connection closed by the server\nCheck that the server is running',
+  r'连接设置': r'Connection',
+  r'连接失败': r'Connection failed',
+  r'连接网络、浏览文件、上传下载': r'Connect, browse files, upload and download',
+  r'内网访问': r'LAN access',
+  r'批量下载完成': r'Batch download complete',
+  r'平台: ${Platform.operatingSystem}': r'Platform: ${Platform.operatingSystem}',
+  r'启动服务端模式': r'Start server mode',
+  r'启动用户端模式': r'Start client mode',
+  r'清空失败: $e': r'Clear failed: $e',
+  '请求超时\n请检查网络连接或稍后重试': 'Request timed out\nCheck your network or retry late',
+  '请求的资源未找到 (404)\n请检查服务端地址和端口是否正确': 'Resource not found (404)\nCheck the server address and port',
+  r'请输入文件夹名称': r'Enter the folder name',
+  r'请输入新名称': r'Enter the new name',
+  '权限不足 (403)\n当前设备无权执行此操作': 'Permission denied (403)\nThis device is not allowed to do that',
+  r'确定删除选中的 ${_selected.length} 个文件吗？': r'Delete the ${_selected.length} selected file(s)?',
+  r'确定要还原 "$name" 吗？': r'Restore "$name"?',
+  r'确定要清空回收站吗？所有文件将永久删除，此操作不可恢复！': r'Empty the recycle bin? All files will be permanently deleted. This cannot be undone!',
+  r'确定要删除 $name 吗？文件将移入回收站，30天后自动清除。': r'Delete $name? It will be moved to the recycle bin and purged after 30 days.',
+  r'确定要退出当前服务器吗？退出后需要重新验证才能连接。': r'Leave the current server? You will need to verify again to reconnect.',
+  r'确定要永久删除选中的 ${ids.length} 个文件吗？此操作不可恢复！': r'Permanently delete the ${ids.length} selected file(s)? This cannot be undone!',
+  r'确认退出': r'Confirm exit',
+  '认证失败 (401)\n请重新登录或检查设备凭证': 'Authentication failed (401)\nSign in again or check the device credentials',
+  r'删除失败: $e': r'Delete failed: $e',
+  r'上传成功': r'Upload complete',
+  r'上级目录': r'Parent folder',
+  r'设备 ID: $_deviceId': r'Device ID: $_deviceId',
+  r'生成日志失败：$e': r'Failed to generate logs: $e',
+  r'生成时间：${DateTime.now().toIso8601String()}': r'Generated at: ${DateTime.now().toIso8601String()}',
+  r'输入验证码': r'Enter the code',
+  r'刷新失败：${ApiService.describeError(e)}': r'Refresh failed: ${ApiService.describeError(e)}',
+  r'刷新失败：$e': r'Refresh failed: $e',
+  r'私人': r'Private',
+  r'私有组网网盘 · v1.0.0': r'Private mesh drive · v1.0.0',
+  r'跳过': r'Skip',
+  r'退出': r'Exit',
+  r'外网访问': r'Internet access',
+  r'完整用户许可协议存放于程序目录 user_agreement.txt': r'The full license agreement is in user_agreement.txt',
+  '网络连接失败\n请检查服务端是否运行及网络是否通畅': 'Network connection failed\nCheck that the server is running and the network is up',
+  r'未连接服务器': r'Not connected to a server',
+  r'未知错误': r'Unknown error',
+  r'文件 ${file.name} 已上传': r'File ${file.name} uploaded',
+  r'文件 $name 已移入回收站，可在回收站中还原': r'File $name moved to the recycle bin; you can restore it there',
+  r'文件夹 $result 已创建': r'Folder $result created',
+  r'文件网关：${api.fileUrl}': r'File gateway: ${api.fileUrl}',
+  r'我已阅读并同意协议': r'I have read and agree to the agreement',
+  r'无错误记录': r'No errors',
+  r'无法打开文件': r'Cannot open the file',
+  r'无法获取存储目录': r'Cannot get the storage folder',
+  r'无法获取服务器证书（CA）。请确认服务端已启用 HTTPS，且引导端口 9093 可达；或改用 http://（仅限可信网络）。': r'Cannot fetch the server certificate (CA). Make sure HTTPS is enabled on the server and port 9093 is reachable, or use http:// (trusted networks only).',
+  r'下载${_selected.length}': r'Download ${_selected.length}',
+  r'下载成功': r'Download complete',
+  r'新建': r'New',
+  r'选择文件失败': r'Failed to pick files',
+  r'验证并连接': r'Verify and connect',
+  r'已保存到: $savePath': r'Saved to: $savePath',
+  r'已被拉黑': r'Blocked',
+  r'已复制': r'Copied',
+  r'已复制$label地址': r'$label address copied',
+  r'已删除': r'Deleted',
+  r'已刷新': r'Refreshed',
+  r'已完成': r'Done',
+  r'已下载 $ok 个文件': r'Downloaded $ok file(s)',
+  r'已永久删除': r'Permanently deleted',
+  r'已暂停': r'Paused',
+  r'永久删除选中': r'Delete selected permanently',
+  r'语言 / Language': r'Language',
+  r'预览失败': r'Preview failed',
+  r'正在申请...': r'Requesting...',
+  r'正在验证...': r'Verifying...',
+  r'只包含选中的 ${_selected.length} 个文件': r'Only the ${_selected.length} selected file(s)',
+  r'重命名失败': r'Rename failed',
+  r'重试': r'Retry',
+  // ===== 服务端补充 C（关于页/统计）=====\n
+  r'CPU 占用': r'CPU usage',
+  r'Frost Leaves 存储占用': r'Frost Leaves storage usage',
+  r'HTTPS 证书指纹': r'HTTPS certificate fingerprint',
+  r'版本号': r'Version',
+  r'本地服务端实时采样（每秒刷新）': r'Live sampling from the local server (refreshed every second)',
+  r'本进程占全部逻辑核心的百分比': r'Share of all logical cores used by this process',
+  r'磁盘统计': r'Disk statistics',
+  r'存储目录': r'Storage folder',
+  r'服务端口': r'Service port',
+  r'仅统计 Frost Leaves 自身进程': r'Counts the Frost Leaves process only',
+  r'绿色份额': r'Green share',
+  r'内存': r'Memory',
+  r'数据来源': r'Data source',
+  r'说明': r'Notes',
+  r'所在卷的总量 / 已用 / 空闲': r'Volume total / used / free',
+  r'完整 FrostLeaves 用户许可协议存放于程序目录 user_agreement.txt': r'The full FrostLeaves license agreement is in user_agreement.txt in the app folder',
+  r'未启用': r'Not enabled',
+  '由于开发者团队属于高中生，Bug 修复与版本迭代会很慢，敬请谅解。\n\n但我们接受您的反馈，请您通过发邮件的方式向我们说明问题，并附带上问题的截图、日志、报错信息等，感谢您对 Frost Leaves 的支持与信任。':
+      'The developer team is made up of high-school students, so bug fixes and releases can be slow — thanks for your patience.\n\nWe do welcome your feedback: please email us about the problem and attach screenshots, logs or error messages. Thank you for supporting Frost Leaves.',
+  '使用本软件即代表您同意：\n\n1. FrostLeaves 为私有文件存储工具，以开源许可发布，禁止商业使用。所有文件保存在您本地电脑，作者不会收集您的文件。请自行备份重要数据。\n\n2. 内置点对点私有组网、公网地址生成功能，仅调用本地已安装的第三方组网客户端。组网通道仅可用于自有设备之间远程访问私有文件，严禁用于访问境外网络，相关违法后果由使用者自行承担。文件传输加密由软件内置 HTTPS 独立实现，不依赖组网通道。\n\n3. 不得使用本软件存储、传播违法违规内容，不得用于网络攻击等违法行为。\n\n4. 软件按现状提供，不承诺绝对无故障，因硬件、配置、攻击、误操作带来文件损失，由用户自行承担。\n\n5. 自签名 HTTPS 证书浏览器会提示不安全，属于正常现象，传输流量已加密。':
+      'By using this software you agree to the following:\n\n1. FrostLeaves is a private file storage tool released under an open-source, noncommercial license. All files stay on your own computer; the author does not collect them. Please back up important data yourself.\n\n2. The built-in peer-to-peer mesh and public address features only invoke a third-party mesh client already installed on this device. The mesh channel may only be used to reach your own devices; using it to access overseas networks is strictly forbidden and any legal consequences are borne by the user. File transfers are encrypted by the HTTPS implementation built into this app and do not depend on the mesh channel.\n\n3. Do not use this software to store or distribute illegal content, or for network attacks or other unlawful activity.\n\n4. The software is provided as-is with no guarantee of being error-free; data loss caused by hardware, configuration, attacks or misuse is the user\'s responsibility.\n\n5. Browsers will warn about the self-signed HTTPS certificate; this is expected and the traffic is encrypted.',
+  r'Token: ${api.token != null ? "已设置" : "未设置"}': r'Token: ${api.token != null ? "set" : "not set"}',
+  r'已设置': r'set',
+  r'未设置': r'not set',
+  // ===== 服务端补充 A（界面/网络/设备）=====
+  r'（无更多信息）': r'(no further information)',
+  r'0.0.0.0 允许局域网访问': r'0.0.0.0 allows LAN access',
+  r'HTTPS 证书（局域网加密）': r'HTTPS certificate (LAN encryption)',
+  r'HTTP网关绑定地址': r'HTTP gateway bind address',
+  r'Web 服务端口': r'Web service port',
+  r'安装证书到本机': r'Install certificate on this PC',
+  r'保存中…': r'Saving...',
+  r'备注（访客打开时看到的标题）': r'Note (title guests see)',
+  r'本机文件存储地址': r'Local storage path',
+  r'部分端口未能放行': r'Some ports could not be allowed',
+  r'查看手动步骤': r'View manual steps',
+  r'查看指纹': r'View fingerprint',
+  r'常驻与公网（本轮新增）': r'Startup & public access',
+  r'存储配置': r'Storage',
+  r'打开': r'Open',
+  r'单客户端总上传上限 (bytes)': r'Total upload limit per client (bytes)',
+  r'单文件最大尺寸 (bytes)': r'Max file size (bytes)',
+  r'点击查看系统占用': r'Tap to view resource usage',
+  r'点击进入设备管理': r'Tap to open device management',
+  r'吊销这个分享？': r'Revoke this share?',
+  r'读取证书信息失败': r'Failed to read certificate info',
+  r'读写': r'Read & write',
+  r'多选（勾选）': r'Multi-select (check boxes)',
+  r'二维码': r'QR code',
+  r'二维码加载失败（请确认服务端已更新）': r'Failed to load the QR code (make sure the server is up to date)',
+  r'放行防火墙端口': r'Allow firewall ports',
+  r'放行失败': r'Failed to allow',
+  r'分享被拒绝': r'Share denied',
+  r'服务端程序路径': r'Server executable path',
+  r'服务端未返回管理令牌': r'The server did not return an admin token',
+  r'服务器名称（客户端与标题栏显示）': r'Server name (shown in clients and the title bar)',
+  r'服务器信息（需求 2）': r'Server info',
+  r'服务状态': r'Service status',
+  r'复制并关闭': r'Copy and close',
+  r'复制分享': r'Copy share link',
+  r'复制公网网址': r'Copy public URL',
+  r'复制内网网址': r'Copy LAN URL',
+  r'该分享链接将立即失效，已发出去的链接都不能再用。': r'This link will stop working immediately; previously shared links will no longer work.',
+  r'公网访问（点对点私有组网）': r'Public access (peer-to-peer mesh)',
+  r'公网访问已关闭': r'Public access disabled',
+  r'关闭公网访问': r'Disable public access',
+  r'关于我们': r'About us',
+  r'管理通道未就绪': r'Admin channel not ready',
+  r'还没有分享': r'No shares yet',
+  r'检测环境': r'Check environment',
+  r'局域网访问（Windows 防火墙，需求 6）': r'LAN access (Windows firewall)',
+  r'拒绝设备': r'Reject device',
+  r'开机自启服务端': r'Start server on boot',
+  r'开机自启目前仅支持 Windows': r'Auto-start is currently Windows-only',
+  r'开启公网访问': r'Enable public access',
+  r'可上传': r'Upload allowed',
+  r'拉黑设备': r'Block device',
+  r'立即启动服务端': r'Start the server now',
+  r'浏览文件': r'Browse files',
+  r'目录（相对 storage，例如 shared/照片）': r'Folder (relative to storage, e.g. shared/photos)',
+  r'配额超限': r'Quota exceeded',
+  r'批量操作：下载 / 删除 / 创建分享（只含选中文件）': r'Bulk actions: download / delete / share (selected files only)',
+  r'请检查服务端状态后重试': r'Check the server status and retry',
+  r'请将以下验证码发送给设备用户：': r'Send the following code to the device user:',
+  r'请求过频': r'Too many requests',
+  r'请先填写服务端程序路径': r'Enter the server executable path first',
+  r'权限拒绝': r'Permission denied',
+  r'全局默认配额（0=不限制）': r'Global default quota (0 = unlimited)',
+  r'确认解除': r'Confirm unblock',
+  r'确认拉黑': r'Confirm block',
+  r'确认踢出': r'Confirm kick',
+  r'扫码打开': r'Scan to open',
+  r'删除文件': r'Delete file',
+  r'上传被拦截': r'Upload blocked',
+  r'上传限速 (KB/s)': r'Upload limit (KB/s)',
+  r'设备断开': r'Device disconnected',
+  r'设备连接': r'Device connected',
+  r'设备申请': r'Device request',
+  r'设备已解除黑名单': r'Device unblocked',
+  r'设备已拉黑': r'Device blocked',
+  r'设备已踢出': r'Device kicked',
+  r'生成验证码': r'Generate code',
+  r'手动放行防火墙（完整步骤）': r'Manual firewall steps',
+  r'授权服务端口': r'Auth service port',
+  r'探测失败': r'Probe failed',
+  r'完成': r'Done',
+  r'完整读写（慎用）': r'Full read & write (use with care)',
+  r'网络配置': r'Network',
+  r'未检测到可用的组网客户端': r'No usable mesh client detected',
+  r'文件管理（公共文件）': r'Files (public folder)',
+  r'文件网关端口': r'File gateway port',
+  r'下载文件': r'Download file',
+  r'下载限速 (KB/s)': r'Download limit (KB/s)',
+  r'新名称': r'New name',
+  r'修改': r'Change',
+  r'选择本机文件存储目录': r'Choose the local storage folder',
+  r'验证码已生成': r'Code generated',
+  r'验证设备': r'Verify device',
+  r'已达下载上限': r'Download limit reached',
+  r'已关闭开机自启': r'Auto-start disabled',
+  r'已过期': r'Expired',
+  r'已审批': r'Approved',
+  r'有效期 5 分钟，一次性使用': r'Valid for 5 minutes, single use',
+  r'有效期（小时，0=默认24h，-1=永久）': r'Validity (hours; 0 = default 24h, -1 = permanent)',
+  r'右键文件可多选、批量下载/删除、或为选中文件创建分享': r'Right-click files to multi-select, batch download/delete, or share the selection',
+  r'预览': r'Preview',
+  r'在浏览器打开': r'Open in browser',
+  r'暂无任务记录': r'No tasks yet',
+  r'证书安装失败': r'Certificate install failed',
+  r'证书信息': r'Certificate info',
+  r'证书已安装（当前用户）': r'Certificate installed (current user)',
+  r'只读': r'Read-only',
+  r'只读 + 可上传（投递箱）': r'Read-only + upload (drop box)',
+  r'只读（可看/可下载）': r'Read-only (view/download)',
+  r'总设备数': r'Total devices',
+  r'组网客户端可用': r'Mesh client available',
+  r'组网命令（进阶，默认自动探测）': r'Mesh command (advanced, auto-detected)',
+  r'最多下载次数（0=不限）': r'Max downloads (0 = unlimited)',
+  r'最近任务': r'Recent tasks',
+  r'重新读取': r'Reload',
+  r'已放行': r'allowed',
+  r'可用': r'available',
+  r'不可用': r'unavailable',
+  // ===== 服务端补充 B（带插值/换行）=====
+  '\$err\n\n--- 原始输出 ---\n\$out': '\$err\n\n--- raw output ---\n\$out',
+  r'操作失败: $e': r'Operation failed: $e',
+  r'操作失败：${r.stderr}': r'Operation failed: ${r.stderr}',
+  r'操作失败：$e': r'Operation failed: $e',
+  r'保存失败：$e': r'Save failed: $e',
+  r'成功 $ok 个，失败 ${failed.length} 个：${failed.first}': r'$ok succeeded, ${failed.length} failed: ${failed.first}',
+  r'创建分享失败：${ApiService.describeError(e)}': r'Failed to create share: ${ApiService.describeError(e)}',
+  r'创建失败：$e': r'Create failed: $e',
+  r'待审核 (${_pendingDevices.length})': r'Pending (${_pendingDevices.length})',
+  r'吊销失败：$e': r'Revoke failed: $e',
+  r'读取配置失败：$e': r'Failed to load config: $e',
+  r'读取失败：${ApiService.describeError(e)}': r'Load failed: ${ApiService.describeError(e)}',
+  r'加载失败：$e': r'Load failed: $e',
+  r'公网：${_publicLink(code)}': r'Public: ${_publicLink(code)}',
+  r'公网访问已开启${url.isEmpty ? "" : "：$url"}': r'Public access enabled${url.isEmpty ? "" : "：$url"}',
+  r'链接已复制：$text': r'Link copied: $text',
+  r'已复制 $email': r'Copied $email',
+  r'已复制公网网址': r'Public URL copied',
+  r'已复制内网网址': r'LAN URL copied',
+  r'已开启：$tunnelUrl': r'Enabled: $tunnelUrl',
+  r'已放行：${ports.join(", ")}': r'Allowed: ${ports.join(", ")}',
+  r'已连接 (${_connectedDevices.length})': r'Connected (${_connectedDevices.length})',
+  r'已拒绝/拉黑 (${_blockedDevices.length})': r'Rejected/Blocked (${_blockedDevices.length})',
+  r'已上传 $ok 个文件到 $_currentPath': r'Uploaded $ok file(s) to $_currentPath',
+  r'已下载 $ok 个文件到 ${dir.path}': r'Downloaded $ok file(s) to ${dir.path}',
+  r'已下载到 ${dir.path}': r'Downloaded to ${dir.path}',
+  r'已选 ${_selected.length} 个文件': r'${_selected.length} file(s) selected',
+  r'已移入回收站：${paths.length} 个': r'Moved to recycle bin: ${paths.length}',
+  r'设备: $deviceId': r'Device: $deviceId',
+  r'找不到文件：$exe': r'File not found: $exe',
+  r'重命名失败：${ApiService.describeError(e)}': r'Rename failed: ${ApiService.describeError(e)}',
+  r'删除失败：${ApiService.describeError(e)}': r'Delete failed: ${ApiService.describeError(e)}',
+  r'下载失败：${ApiService.describeError(e)}': r'Download failed: ${ApiService.describeError(e)}',
+  r'选择目录失败：${ApiService.describeError(e)}': r'Failed to pick folder: ${ApiService.describeError(e)}',
+  r'无法建立管理通道：${ApiService.describeError(e)}（请确认运行在服务端这台机器上）': r'Cannot open the admin channel: ${ApiService.describeError(e)} (make sure you run this on the server machine)',
+  r'启动失败：$e': r'Start failed: $e',
+  r'批量下载 (${_selected.length})': r'Download (${_selected.length})',
+  r'为选中的 ${_selected.length} 个文件创建分享': r'Share ${_selected.length} selected file(s)',
+  r'确定删除「${item.name}」吗？文件会移入回收站，可从回收站恢复。': r'Delete "${item.name}"? It will be moved to the recycle bin and can be restored.',
+  r'确定删除选中的 ${_selected.length} 个文件吗？文件会移入回收站，可从回收站恢复。': r'Delete the ${_selected.length} selected file(s)? They will be moved to the recycle bin and can be restored.',
+  '确定要解除设备 "\${deviceName.isEmpty ? deviceId : deviceName}" 的黑名单吗？\n该设备将可以重新申请连接。': 'Unblock "\${deviceName.isEmpty ? deviceId : deviceName}"?\nThe device will be able to request access again.',
+  '确定要拉黑设备 "\${deviceName.isEmpty ? deviceId : deviceName}" 吗？\n该设备将无法再连接到服务器。': 'Block "\${deviceName.isEmpty ? deviceId : deviceName}"?\nThe device will no longer be able to connect.',
+  '确定要踢出设备 "\${deviceName.isEmpty ? deviceId : deviceName}" 吗？\n该设备需要重新验证才能连接。': 'Kick "\${deviceName.isEmpty ? deviceId : deviceName}"?\nThe device will need to verify again to connect.',
+  '状态：\${available ? "可用" : "不可用"}\n路径：\${exe.isEmpty ? "-" : exe}\n版本：\${version.isEmpty ? "-" : version}\n说明：\$message': 'Status: \${available ? "available" : "unavailable"}\nPath: \${exe.isEmpty ? "-" : exe}\nVersion: \${version.isEmpty ? "-" : version}\nNote: \$message',
+  '指纹(SHA-256)：\n\${d?["fingerprint"] ?? "-"}\n\n覆盖地址：\n\$sans\n\nCA 下载：\n\${d?["ca_url"] ?? "-"}\n\nHTTPS 网页：\n\${d?["https_web"] ?? "-"}': 'Fingerprint (SHA-256):\n\${d?["fingerprint"] ?? "-"}\n\nCovered addresses:\n\$sans\n\nCA download:\n\${d?["ca_url"] ?? "-"}\n\nHTTPS web:\n\${d?["https_web"] ?? "-"}',
+  '命令：certutil -addstore -user Root <CA>\n退出码：\${r.exitCode}\n\n\${r.stdout}\n\${r.stderr}': 'Command: certutil -addstore -user Root <CA>\nExit code: \${r.exitCode}\n\n\${r.stdout}\n\${r.stderr}',
+  r'至 ${dt.toLocal().toString().substring(0, 16)}': r'Until ${dt.toLocal().toString().substring(0, 16)}',
+  r'目录：${s["target"] ?? ""}': r'Folder: ${s["target"] ?? ""}',
+  r'$permText · ${_expText(s)} · 下载 ${s["downloads"] ?? 0}': r'$permText · ${_expText(s)} · Download ${s["downloads"] ?? 0}',
+  r'前置条件：本机已安装 点对点私有组网客户端并完成登录；首次使用需在组网客户端后台为组网启用公网访问。': r'Prerequisite: the peer-to-peer mesh client is installed and signed in. The first time, enable public access for the mesh in the mesh client's admin console.',
+  '请先填写服务端程序路径（例如 D:\\FrostLeaves\\FrostLeaves_Server.exe）': 'Enter the server executable path first (e.g. D:\\FrostLeaves\\FrostLeaves_Server.exe)-netdisk\\FrostLeaves_Server.exe)',
+  r'局域网已启用 HTTPS（自签证书）。在本机装一次证书后，浏览器访问 https://<局域网IP>:9092 就不会再告警。': r'HTTPS is enabled on the LAN (self-signed certificate). After installing the certificate once, browsers will stop warning on https://<LAN IP>:9092.',
+  r'手机/浏览器连不上，通常是 Windows 防火墙拦了这几个端口。点下面按钮自动放行（会弹 UAC 授权窗口）；若失败可查看手动步骤。': r'If phones or browsers cannot connect, Windows Firewall is usually blocking these ports. Click the button below to allow them automatically (a UAC prompt appears); if it fails, see the manual steps.',
+  r'说明：桌面端只负责管理，服务端是独立的 FrostLeaves_Server.exe；关掉本窗口服务仍然运行。': r'Note: this desktop app only manages things; the server is a separate FrostLeaves_Server.exe and keeps running after you close this window.',
+  r'未开启（未开启时只能在局域网内访问；开启后亲友可通过公网 HTTPS 地址访问）': r'Disabled (LAN-only access while disabled; when enabled, friends and family can use the public HTTPS address)',
+  '默认「服务器」，例如：蒜叶的服务器': 'Defaults to "Server", e.g. Suanye\'s server',
+  // ===== 服务端补充 D（防火墙步骤/配置/关于页）=====
+  r'仅 Windows 需要配置防火墙': r'Firewall configuration is only needed on Windows',
+  r'规则已存在：${ruleName(port)}': r'Rule already exists: ${ruleName(port)}',
+  r'已放行端口 $port': r'Port $port allowed',
+  r'未创建成功（可能取消了 UAC 授权）': r'Not created (the UAC prompt may have been cancelled)',
+  r'【方式一：命令行】以管理员身份打开 PowerShell 或 CMD，逐条执行：': r'[Option 1: command line] Open PowerShell or CMD as administrator and run each command:',
+  r'【方式二：图形界面】': r'[Option 2: GUI]',
+  r'1. 按 Win+R，输入 wf.msc 回车': r'1. Press Win+R, type wf.msc and press Enter',
+  r'2. 左侧点「入站规则」→ 右侧「新建规则」': r'2. Click "Inbound Rules" on the left, then "New Rule" on the right',
+  r'3. 规则类型选「端口」→ 下一步': r'3. Choose "Port" as the rule type, then Next',
+  r'4. 选「TCP」，特定本地端口填：${ports.join(",")}': r'4. Choose "TCP" and enter the local ports: ${ports.join(",")}',
+  r'5. 选「允许连接」→ 下一步（域/专用/公用全勾选）': r'5. Choose "Allow the connection", then Next (tick Domain/Private/Public)',
+  r'6. 名称填 FrostLeaves → 完成': r'6. Name it FrostLeaves, then Finish',
+  r'【检查是否生效】': r'[Verify the rules]',
+  r'已选择存储目录，点【保存配置】生效（重启服务端后完全生效）': r'Storage folder selected; click Save config to apply (fully effective after restart)',
+  r'已保存。端口/绑定地址的改动需要重启服务端才生效。': r'Saved. Port/bind changes take effect after the server restarts.',
+  r'已开启开机自启': r'Auto-start enabled',
+  r'已尝试启动服务端（请稍候刷新仪表盘确认）': r'Attempted to start the server (refresh the dashboard shortly to confirm)',
+  r'绿色 = Frost Leaves 占用 · 蓝色 = 其他程序 · 灰色 = 空闲': r'Green = Frost Leaves · Blue = other programs · Gray = free',
+  r'读取系统信息失败：$_error': r'Failed to read system info: $_error',
+  r'其他程序': r'Other programs',
+  r'100% · ${m["cpu_cores"] ?? "-"} 核': r'100% · ${m["cpu_cores"] ?? "-"} cores',
+  r'文件存储': r'File storage',
+  r'用户协议': r'License agreement',
+  r'总量 $totalText': r'Total $totalText',
+  // ===== 系统环境与兼容性要求 =====
+  r'系统环境与兼容性要求': r'System environment & compatibility',
+  r'当前系统': r'Current system',
+  r'本软件Windows服务端仅支持x64架构，兼容 Windows 10 1809 及以上系统；Android客户端最低兼容 Android 5.0（推荐 Android 8.0 及以上版本）': r'The Windows server supports x64 only and requires Windows 10 1809 or later; the Android client requires Android 5.0 or later (Android 8.0+ recommended).',
+};

@@ -1,0 +1,100 @@
+FrostLeaves 用户许可协议
+当您安装、运行、使用 FrostLeaves（以下简称“本软件”），即代表您已阅读、理解并同意本协议全部条款。若您不同意，请立即关闭并卸载本软件。
+
+一、软件许可范围
+1. 本软件为个人私有文件存储工具，依据 PolyForm Noncommercial 1.0.0 许可（见 LICENSE 文件）授权：您可以自由使用、修改与分发，但仅限非商业用途，且需保留版权声明；作者不提供任何形式的担保。
+2. 您不得对本软件进行逆向工程、反编译、二次分发、售卖，或用于商业服务。
+3. 本软件包含Windows服务端与安卓客户端。
+
+二、关于点对点私有组网与公网访问功能
+1. 本软件仅支持调用用户本地已经安装完成的点对点私有组网第三方客户端命令行，不内置、不打包、不自动下载该第三方程序。
+2. 该点对点组网工具属于第三方独立服务，您需要自行前往对应官网注册账号、下载安装，并遵守该第三方自身用户协议。
+3. 点对点组网及软件内的公网地址生成功能，仅允许用于您自有多台设备之间的点对点互通，实现私有文件远程访问。
+4. 严禁使用本软件搭配该组网通道访问境外互联网。一旦发生此类行为，全部法律责任由使用者本人独立承担，本软件作者不承担任何连带责任。
+5. 您可以选择不启用点对点私有组网功能，仅使用局域网访问；文件传输加密由本软件内置HTTPS(TLS)独立实现，不依赖组网通道。
+
+三、用户责任与禁止行为
+1. 您保证上传存储在 FrostLeaves 内的所有文件、内容，均拥有合法权利，不传播色情、暴力、侵权、违法信息。
+2. 禁止利用本软件进行入侵、爬虫、攻击、非法数据采集等任何违反中华人民共和国法律的行为。
+3. 您有义务保管好自己的设备、验证会话，妥善配置防火墙、访问权限；因您自身配置不当、会话泄露造成的数据泄露，责任由用户自行承担。
+4. 本软件仅提供公共文件夹的读写管理；私人文件由用户自行做好权限保护。
+
+四、数据存储与免责
+1. 所有文件数据全部保存在您自己的电脑硬盘中，本软件作者不会收集、上传、读取您的任何文件内容。
+2. 本软件按照“现状”提供，不作任何形式的担保，不保证软件绝对无漏洞、永不宕机、数据永不丢失。请您自行做好重要文件备份。
+3. 因硬件故障、系统崩溃、软件bug、网络攻击、误操作等原因造成文件丢失、损坏，作者不承担赔偿责任。
+
+五、安全相关说明
+1. 本软件采用HTTPS(TLS)做传输加密；服务端【关于】页面展示证书SHA256指纹，供您核验服务器身份。
+2. 自签名HTTPS证书在浏览器访问Web管理页面会提示不安全，属于证书正常现象，不代表传输流量未加密。
+
+六、其他条款
+1. 本协议适用中华人民共和国法律。
+2. 作者保留随时更新本协议的权利，更新后的协议会在软件内展示。
+3. 如果本协议中任意条款被认定无效，其余条款效力不受影响。
+
+
+七、系统环境与兼容性要求
+
+本软件Windows服务端仅支持x64架构，兼容 Windows 10 1809 及以上系统；安卓客户端最低兼容 Android 5.0，推荐 Android 8.0 及以上版本。Android 5.0~7.x为实验性兼容，该区间系统存在TLS加密、文件读写兼容问题与安全隐患，不建议日常使用，相关风险由使用者自行承担。
+=====================================================================================
+
+FrostLeaves User License Agreement
+ 
+By installing, running, or using FrostLeaves (hereinafter referred to as the "Software"), you acknowledge that you have read, understood, and agreed to all terms of this Agreement. If you do not agree, please close and uninstall the Software immediately.
+ 
+1. Software License Scope
+ 
+1. The Software is a private file storage tool. It is licensed under the PolyForm Noncommercial License 1.0.0 (see the LICENSE file): you may use, modify and redistribute it for noncommercial purposes only, provided the copyright notice is retained. The author provides no warranty of any kind.
+​
+2. You shall not reverse engineer, decompile, redistribute, sell the Software, or use it for commercial services.
+​
+3. The Software includes a Windows server and an Android client.
+ 
+2. Peer-to-Peer Private Networking & Public Network Access Features
+ 
+1. The Software can only invoke the command line of a locally installed third-party peer-to-peer networking client. It does not embed, package, or automatically download this third-party program.
+​
+2. This peer-to-peer networking tool is an independent third-party service. You must register an account, download and install it from its official website, and abide by its own user agreement.
+​
+3. The peer-to-peer networking and public address generation functions of the Software are only permitted for point-to-point communication among your own devices to remotely access private files.
+​
+4. It is strictly prohibited to use the Software together with this networking channel to access overseas internet. If such conduct occurs, you shall bear all corresponding legal liabilities independently. The author of the Software shall not be held jointly liable.
+​
+5. You may choose to disable the peer-to-peer private networking function and use local area network access only. File transmission encryption is implemented via built-in HTTPS(TLS) in the Software and does not rely on the networking channel.
+ 
+3. User Responsibilities & Prohibited Conduct
+ 
+1. You warrant that all files and content stored in FrostLeaves are legally owned by you. You shall not store or disseminate pornographic, violent, infringing or illegal content.
+​
+2. You are prohibited from using the Software for intrusion, web crawling, attacks, unauthorized data collection, or any other acts violating the laws of the People’s Republic of China.
+​
+3. You are responsible for securing your devices and login sessions, and properly configuring firewalls and access permissions. Any data leakage caused by improper configuration or session compromise shall be your sole responsibility.
+​
+4. The Software only provides read and write management for public folders. You shall protect your private files on your own.
+ 
+4. Data Storage & Disclaimer
+ 
+1. All file data is stored locally on your computer’s hard drive. The Software author will not collect, upload or read any of your file content.
+​
+2. The Software is provided "as is" without warranties of any kind. The author does not guarantee that the Software is bug-free, will not crash, or that data will never be lost. Please back up important files on your own.
+​
+3. The author shall not be liable for any file loss or damage caused by hardware failure, system crash, software bugs, network attacks, or user misoperation.
+ 
+5. Security Notes
+ 
+1. The Software uses HTTPS(TLS) for transmission encryption. The SHA256 fingerprint of the certificate is displayed on the About page of the server for you to verify server identity.
+​
+2. Self-signed HTTPS certificates will trigger insecure warnings when accessing the web management page via browsers. This is normal and does not mean transmitted traffic is unencrypted.
+ 
+6. Miscellaneous
+ 
+1. This Agreement is governed by the laws of the People’s Republic of China.
+​
+2. The author reserves the right to update this Agreement. Updated terms will be displayed within the Software.
+​
+3. If any clause of this Agreement is deemed invalid, the remaining clauses shall remain in full force and effect.
+
+7. System Environment & Compatibility Requirements
+
+The Windows server of this Software supports the x64 architecture only and is compatible with Windows 10 1809 and above. The Android client requires Android 5.0 or above, and Android 8.0 or above is recommended. Android 5.0-7.x is provided as experimental compatibility only: on those versions there may be TLS encryption and file read/write compatibility issues as well as security risks, so they are not recommended for daily use. All related risks shall be borne by the user.
