@@ -129,7 +129,7 @@ class _ServerDashboardPageState extends ConsumerState<ServerDashboardPage> {
               const SizedBox(width: 16),
               _StatCard(
                 title: t(t('关于我们')),
-                value: 'v${_loading ? "..." : _status?['version'] ?? "1.0.0 beta"}',
+                value: 'v${_loading ? "..." : _status?['version'] ?? "1.0.1 beta"}',
                 icon: Icons.info_outline,
                 color: AppTheme.textSecondary,
                 onTap: () => context.go('/server/about'),

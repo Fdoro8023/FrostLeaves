@@ -31,7 +31,7 @@ import (
 // ========== Version ==========
 
 const (
-	AppVersion = "1.0.0 beta"
+	AppVersion = "1.0.1 beta"
 	AppName    = "FrostLeaves"
 )
 

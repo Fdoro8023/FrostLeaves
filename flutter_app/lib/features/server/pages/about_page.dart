@@ -157,7 +157,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           _infoCard(
             title: t('版本信息'),
             rows: [
-              [t('版本号'), 'v${m?['version'] ?? '1.0.0 beta'}'],
+              [t('版本号'), 'v${m?['version'] ?? '1.0.1 beta'}'],
               [t('服务器名称'), (_tls?['server_name'] ?? t('服务器')).toString()],
               [t('存储目录'), (m?['disk_path'] ?? '-').toString()],
               [t('Frost Leaves 存储占用'), _fmtBytes(m?['disk_app'] as num?)],

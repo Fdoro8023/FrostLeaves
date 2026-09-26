@@ -319,7 +319,7 @@ const Map<String, String> _en = <String, String>{
   r'刷新失败：${ApiService.describeError(e)}': r'Refresh failed: ${ApiService.describeError(e)}',
   r'刷新失败：$e': r'Refresh failed: $e',
   r'私人': r'Private',
-  r'私有组网网盘 · v1.0.0': r'Private mesh drive · v1.0.0',
+  r'私有组网网盘 · v1.0.1': r'Private mesh drive · v1.0.0',
   r'跳过': r'Skip',
   r'退出': r'Exit',
   r'外网访问': r'Internet access',

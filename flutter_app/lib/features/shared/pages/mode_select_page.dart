@@ -240,7 +240,7 @@ class _ModeSelectPageState extends ConsumerState<ModeSelectPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    t('私有组网网盘 · v1.0.0'),
+                    t('私有组网网盘 · v1.0.1'),
                     style: TextStyle(
                       fontSize: 14,
                       color: AppTheme.textSecondary,

@@ -14,7 +14,7 @@ class ClientAboutPage extends ConsumerStatefulWidget {
   @override
   ConsumerState<ClientAboutPage> createState() => _ClientAboutPageState();
 
-  static const String clientVersion = 'v1.0.0 beta';
+  static const String clientVersion = 'v1.0.1 beta';
 }
 
 class _ClientAboutPageState extends ConsumerState<ClientAboutPage> {

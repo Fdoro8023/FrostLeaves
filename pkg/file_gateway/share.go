@@ -695,6 +695,19 @@ func (gw *FileGateway) handleShareUpload(w http.ResponseWriter, r *http.Request,
 	}
 	defer file.Close()
 
+	// 安全补丁 1.0.1：上传内容校验（包含式黑名单 + 后缀黑名单 + MZ 魔数），
+	// 投递箱/公开分享是暴露面最大的入口，必须与主上传路径同等校验。
+	if f, ferr := header.Open(); ferr == nil {
+		head := make([]byte, 512)
+		n, _ := io.ReadFull(f, head)
+		f.Close()
+		if bad, reason := security.SniffDangerous(header.Filename, head[:n]); bad {
+			gw.audit.Log("share:"+sh.Code, "upload_blocked", rel+"/"+filepath.Base(header.Filename), "denied", reason, r.RemoteAddr)
+			writeJSON(w, 415, map[string]string{"error": "upload blocked: " + reason})
+			return
+		}
+	}
+
 	name := filepath.Base(header.Filename)
 	if name == "" || name == "." || name == string(os.PathSeparator) {
 		writeJSON(w, 400, map[string]string{"error": "invalid file name"})

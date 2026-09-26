@@ -117,6 +117,12 @@ func IsPublicTarget(target string) bool {
 
 // ---------- 需求 4：上传类型校验 ----------
 
+// containsBadExt 危险片段黑名单（安全补丁 1.0.1）：
+// 只要文件名中出现这些片段就拒绝 —— 不只看末尾后缀，
+// 防止 `报告.exe.pdf`、`setup.bat.txt`、`x.cmd.png` 这类改名绕过。
+var containsBadExt = []string{".exe", ".bat", ".cmd", ".ps1"}
+
+// dangerousExt 末尾后缀黑名单（保留原有校验，覆盖更多类型）
 var dangerousExt = map[string]bool{
 	".exe": true, ".msi": true, ".bat": true, ".cmd": true, ".com": true, ".scr": true,
 	".ps1": true, ".psm1": true, ".vbs": true, ".vbe": true, ".js": true, ".jse": true,
@@ -126,14 +132,25 @@ var dangerousExt = map[string]bool{
 	".reg": true, ".gadget": true, ".msc": true, ".ocx": true, ".pif": true,
 }
 
-// SniffDangerous 扩展名 + 魔数双重判断（防止改名绕过）
+// SniffDangerous 文件名包含式黑名单 + 后缀黑名单 + 魔数三重判断（防改名绕过）
 func SniffDangerous(name string, head []byte) (bool, string) {
 	lower := strings.ToLower(name)
+
+	// ① 包含式黑名单：文件名任何位置出现 .exe/.bat/.cmd/.ps1 都拒绝
+	for _, seg := range containsBadExt {
+		if strings.Contains(lower, seg) {
+			return true, "dangerous filename segment " + seg
+		}
+	}
+
+	// ② 后缀黑名单（原有校验，保留）
 	if ext := filepath.Ext(lower); ext != "" && dangerousExt[ext] {
 		return true, "executable extension " + ext
 	}
-	if len(head) >= 2 && head[0] == 'M' && head[1] == 'Z' {
-		return true, "PE executable magic"
+
+	// ③ 魔数：前 2 字节为 MZ（0x4D 0x5A）即 PE 可执行文件，忽略文件名一律拒绝
+	if len(head) >= 2 && head[0] == 0x4D && head[1] == 0x5A {
+		return true, "PE executable magic (MZ)"
 	}
 	if len(head) >= 4 && head[0] == 0x7F && head[1] == 'E' && head[2] == 'L' && head[3] == 'F' {
 		return true, "ELF executable magic"

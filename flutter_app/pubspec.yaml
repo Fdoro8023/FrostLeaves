@@ -1,7 +1,7 @@
 name: frost_leaves
 description: "Frost Leaves - Private Network Storage"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.5.4
