@@ -3,6 +3,7 @@
 package security
 
 import (
+	"bytes"
 	"log"
 	"net"
 	"net/http"
@@ -132,7 +133,33 @@ var dangerousExt = map[string]bool{
 	".reg": true, ".gadget": true, ".msc": true, ".ocx": true, ".pif": true,
 }
 
-// SniffDangerous 文件名包含式黑名单 + 后缀黑名单 + 魔数三重判断（防改名绕过）
+// extMagic 声明为这些"无害"后缀时，内容必须匹配对应魔数；
+// 否则说明是改了后缀的伪装文件（exe/apk/zip/脚本塞进 .png 等）→ 直接拒绝。
+var extMagic = map[string][][]byte{
+	".png":  {{0x89, 'P', 'N', 'G'}},
+	".jpg":  {{0xFF, 0xD8, 0xFF}},
+	".jpeg": {{0xFF, 0xD8, 0xFF}},
+	".gif":  {{'G', 'I', 'F', '8'}},
+	".bmp":  {{'B', 'M'}},
+	".webp": {{'R', 'I', 'F', 'F'}},
+	".pdf":  {{'%', 'P', 'D', 'F'}},
+	".zip":  {{'P', 'K'}},
+	".docx": {{'P', 'K'}},
+	".xlsx": {{'P', 'K'}},
+	".pptx": {{'P', 'K'}},
+	".ico":  {{0x00, 0x00, 0x01, 0x00}},
+	".mp3":  {{'I', 'D', '3'}},
+	".wav":  {{'R', 'I', 'F', 'F'}},
+}
+
+// textExt 纯文本后缀：内容里不允许出现 NUL 字节（二进制伪装成文本要拒绝）
+var textExt = map[string]bool{
+	".txt": true, ".md": true, ".json": true, ".csv": true, ".log": true,
+	".xml": true, ".yml": true, ".yaml": true, ".ini": true, ".conf": true,
+	".html": true, ".htm": true, ".css": true, ".svg": true,
+}
+
+// SniffDangerous 包含式黑名单 + 后缀黑名单 + 魔数 + 扩展名/内容一致性 多重判断
 func SniffDangerous(name string, head []byte) (bool, string) {
 	lower := strings.ToLower(name)
 
@@ -144,7 +171,8 @@ func SniffDangerous(name string, head []byte) (bool, string) {
 	}
 
 	// ② 后缀黑名单（原有校验，保留）
-	if ext := filepath.Ext(lower); ext != "" && dangerousExt[ext] {
+	ext := filepath.Ext(lower)
+	if ext != "" && dangerousExt[ext] {
 		return true, "executable extension " + ext
 	}
 
@@ -158,6 +186,40 @@ func SniffDangerous(name string, head []byte) (bool, string) {
 	if len(head) >= 2 && head[0] == '#' && head[1] == '!' {
 		return true, "script shebang"
 	}
+	// ZIP 容器（含 APK/JAR/DOCX 等）不允许冒充其他类型
+	if len(head) >= 4 && head[0] == 'P' && head[1] == 'K' {
+		if _, ok := extMagic[ext]; !ok || (ext != ".zip" && ext != ".docx" && ext != ".xlsx" && ext != ".pptx") {
+			return true, "archive container disguised as " + ext
+		}
+	}
+
+	// ④ 扩展名/内容一致性：声明为图片/文档/压缩包，内容必须匹配
+	if sigs, ok := extMagic[ext]; ok {
+		matched := false
+		for _, sig := range sigs {
+			if len(head) >= len(sig) && bytes.Equal(head[:len(sig)], sig) {
+				matched = true
+				break
+			}
+		}
+		// MP4/MOV：ftyp 位于偏移 4
+		if !matched && (ext == ".mp4" || ext == ".mov") && len(head) >= 8 && string(head[4:8]) == "ftyp" {
+			matched = true
+		}
+		if !matched {
+			return true, "content does not match extension " + ext
+		}
+	}
+
+	// ⑤ 纯文本后缀：出现 NUL 字节说明是二进制伪装
+	if textExt[ext] {
+		for _, b := range head {
+			if b == 0x00 {
+				return true, "binary content disguised as " + ext
+			}
+		}
+	}
+
 	return false, ""
 }
 

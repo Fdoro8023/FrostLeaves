@@ -167,6 +167,8 @@
         function getFileGatewayUrl(authUrl) {
             try {
                 const url = new URL(authUrl);
+                // 同源连接：网页服务已把文件 API 反代到本机网关，直接用当前源即可
+                if (url.origin === location.origin) { return location.origin; }
                 const port = parseInt(url.port);
                 if (port > 1) { url.port = (port - 1).toString(); }
                 return url.origin;
@@ -371,7 +373,8 @@
         // ============ 设备模式：连接与配对 ============
         async function connect() {
             let url = document.getElementById('serverUrl').value.trim();
-            if (!url) { showToast('请输入服务器地址', 'error'); return; }
+            // 留空 = 使用当前网页同源（推荐：走服务端反代，不跨域、不需要信任证书）
+            if (!url) { url = location.origin; }
             if (!/^https?:\/\//.test(url)) { url = 'http://' + url; }
             serverUrl = url.replace(/\/+$/, '');
             fileGatewayUrl = getFileGatewayUrl(serverUrl);

@@ -575,6 +575,18 @@ func main() {
 		log.Printf("[WebService] share API proxied to %s", target)
 	}
 
+	// 文件管理 API 同样反代：网页端只用同源访问，规避跨域与自签证书问题
+	if ft, ferr := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", cfg.HTTPPort)); ferr == nil {
+		filesProxy := httputil.NewSingleHostReverseProxy(ft)
+		origFiles := filesProxy.Director
+		filesProxy.Director = func(req *http.Request) {
+			origFiles(req)
+			req.Header.Del("X-Admin-Token")
+		}
+		webMux.Handle("/api/v1/files/", filesProxy)
+		log.Printf("[WebService] files API proxied to %s", ft)
+	}
+
 	// 隧道管理接口（管理员）：网页端也能开关 Funnel
 	setupTunnelRoutes(webMux, cfg)
 
