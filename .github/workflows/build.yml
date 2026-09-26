@@ -1,0 +1,89 @@
+name: build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows server + desktop client
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: false
+      - name: Build Go server
+        run: go build -o dist/FrostLeaves_Server.exe ./cmd/server
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+          cache: true
+      - name: Flutter deps
+        working-directory: flutter_app
+        run: flutter pub get
+      - name: Build Windows client
+        working-directory: flutter_app
+        run: flutter build windows --release --no-pub
+      - name: Package Windows bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows | Out-Null
+          Copy-Item 'flutter_app/build/windows/x64/runner/Release/*' dist/windows -Recurse -Force
+          Copy-Item dist/FrostLeaves_Server.exe dist/windows -Force
+          Copy-Item user_agreement.txt dist/windows -Force
+          Compress-Archive -Path 'dist/windows/*' -DestinationPath 'dist/FrostLeaves_Windows.zip' -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/FrostLeaves_Windows.zip
+
+  android:
+    name: Android client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+          cache: true
+      - name: Flutter deps
+        working-directory: flutter_app
+        run: flutter pub get
+      - name: Build APK
+        working-directory: flutter_app
+        run: flutter build apk --release --no-pub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: flutter_app/build/app/outputs/flutter-apk/app-release.apk
+
+  release:
+    name: Attach artifacts to release
+    needs: [windows, android]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Rename assets
+        run: |
+          mkdir -p assets
+          cp windows/FrostLeaves_Windows.zip 'assets/Frost.Leaves.1.0.0.beta.for.windows.zip'
+          cp android/app-release.apk 'assets/Frost.Leaves.1.0.0.beta.for.android.apk'
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          draft: false
+          prerelease: true
