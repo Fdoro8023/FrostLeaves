@@ -308,6 +308,7 @@ const Map<String, String> _en = <String, String>{
   r'确定要退出当前服务器吗？退出后需要重新验证才能连接。': r'Leave the current server? You will need to verify again to reconnect.',
   r'确定要永久删除选中的 ${ids.length} 个文件吗？此操作不可恢复！': r'Permanently delete the ${ids.length} selected file(s)? This cannot be undone!',
   r'确认退出': r'Confirm exit',
+  r'警告：本软件没有账户机制，退出服务器后，你在该服务器上的所有私人文件都会丢失且无法找回。请务必先自行备份重要文件！': r'Warning: this app has no account system. After leaving the server, all your private files on that server will be lost and cannot be recovered. Please back up important files first!',
   '认证失败 (401)\n请重新登录或检查设备凭证': 'Authentication failed (401)\nSign in again or check the device credentials',
   r'删除失败: $e': r'Delete failed: $e',
   r'上传成功': r'Upload complete',

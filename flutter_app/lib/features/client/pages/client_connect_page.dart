@@ -256,7 +256,37 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(t('确认退出')),
-        content: Text(t('确定要退出当前服务器吗？退出后需要重新验证才能连接。')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(t('确定要退出当前服务器吗？退出后需要重新验证才能连接。')),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF4CE),
+                border: Border.all(color: const Color(0xFFFFC107)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Color(0xFFB26A00), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      t('警告：本软件没有账户机制，退出服务器后，你在该服务器上的所有私人文件都会丢失且无法找回。请务必先自行备份重要文件！'),
+                      style: const TextStyle(
+                          color: Color(0xFF8A5A00), fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
