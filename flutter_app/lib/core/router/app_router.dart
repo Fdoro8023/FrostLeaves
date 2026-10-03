@@ -9,6 +9,10 @@ import '../../features/server/pages/server_settings_page.dart';
 import '../../features/server/pages/audit_log_page.dart';
 import '../../features/server/pages/share_management_page.dart';
 import '../../features/server/pages/about_page.dart';
+import '../../features/server/pages/recycle_bin_page.dart';
+import '../../features/server/pages/account_policy_page.dart';
+import '../../features/server/pages/email_settings_page.dart';
+import '../../features/server/pages/retention_page.dart';
 import '../../features/client/pages/client_connect_page.dart';
 import '../../features/client/pages/client_file_browser_page.dart';
 import '../../features/client/pages/client_settings_page.dart';
@@ -40,6 +44,22 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/server/files',
             builder: (_, __) => const ServerFileManagerPage(),
+          ),
+          GoRoute(
+            path: '/server/recycle',
+            builder: (_, __) => const ServerRecycleBinPage(),
+          ),
+          GoRoute(
+            path: '/server/accounts',
+            builder: (_, __) => const AccountPolicyPage(),
+          ),
+          GoRoute(
+            path: '/server/email',
+            builder: (_, __) => const EmailSettingsPage(),
+          ),
+          GoRoute(
+            path: '/server/retention',
+            builder: (_, __) => const RetentionPage(),
           ),
           GoRoute(
             path: '/server/settings',

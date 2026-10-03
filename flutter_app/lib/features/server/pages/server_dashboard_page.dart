@@ -89,14 +89,14 @@ class _ServerDashboardPageState extends ConsumerState<ServerDashboardPage> {
           Row(
             children: [
               Text(
-                t(t('仪表盘')),
+                t('仪表盘'),
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
               ),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.refresh),
                 onPressed: _loadStatus,
-                tooltip: t(t('刷新')),
+                tooltip: t('刷新'),
               ),
             ],
           ),
@@ -105,42 +105,42 @@ class _ServerDashboardPageState extends ConsumerState<ServerDashboardPage> {
           Row(
             children: [
               _StatCard(
-                title: t(t('服务状态')),
+                title: t('服务状态'),
                 value: _loading ? '...' : (_backendUp ? 'Running' : 'Unknown'),
                 icon: _backendUp ? Icons.check_circle : Icons.error,
                 color: _backendUp ? AppTheme.successColor : AppTheme.errorColor,
               ),
               const SizedBox(width: 16),
               _StatCard(
-                title: t(t('总设备数')),
+                title: t('总设备数'),
                 value: '${_loading ? "..." : _status?['devices'] ?? 0}',
                 icon: Icons.devices,
                 color: const Color(0xFF8B5CF6),
               ),
               const SizedBox(width: 16),
               _StatCard(
-                title: t(t('已连接')),
+                title: t('已连接'),
                 value: '${_loading ? "..." : _status?['connected'] ?? 0}',
                 icon: Icons.cloud_done,
                 color: AppTheme.primaryColor,
                 onTap: () => context.go('/server/devices'),
-                hint: t(t('点击进入设备管理')),
+                hint: t('点击进入设备管理'),
               ),
               const SizedBox(width: 16),
               _StatCard(
-                title: t(t('关于我们')),
-                value: 'v${_loading ? "..." : _status?['version'] ?? "1.0.1 beta"}',
+                title: t('关于我们'),
+                value: 'v${_loading ? "..." : _status?['version'] ?? "1.1.0 beta"}',
                 icon: Icons.info_outline,
                 color: AppTheme.textSecondary,
                 onTap: () => context.go('/server/about'),
-                hint: t(t('点击查看系统占用')),
+                hint: t('点击查看系统占用'),
               ),
             ],
           ),
           const SizedBox(height: 32),
           // Recent tasks
           Text(
-            t(t('最近任务')),
+            t('最近任务'),
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
           ),
           const SizedBox(height: 12),
@@ -159,7 +159,7 @@ class _ServerDashboardPageState extends ConsumerState<ServerDashboardPage> {
                   children: [
                     Icon(Icons.inbox_outlined, size: 48, color: AppTheme.textSecondary),
                     const SizedBox(height: 8),
-                    Text(t(t('暂无任务记录')), style: TextStyle(color: AppTheme.textSecondary)),
+                    Text(t('暂无任务记录'), style: TextStyle(color: AppTheme.textSecondary)),
                   ],
                 ),
               ),
@@ -187,24 +187,24 @@ class _TaskRow extends StatelessWidget {
 
   String _formatAction(String action) {
     switch (action) {
-      case 'file_upload': return t(t('上传文件'));
-      case 'file_download': return t(t('下载文件'));
-      case 'file_delete': return t(t('删除文件'));
-      case 'file_list': return t(t('浏览文件'));
-      case 'file_rename': return t(t('重命名'));
-      case 'device_apply': return t(t('设备申请'));
-      case 'device_connect': return t(t('设备连接'));
-      case 'device_disconnect': return t(t('设备断开'));
-      case 'code_generate': return t(t('生成验证码'));
-      case 'code_verify': return t(t('验证设备'));
-      case 'device_reject': return t(t('拒绝设备'));
-      case 'device_blacklist': return t(t('拉黑设备'));
-      case 'permission_denied': return t(t('权限拒绝'));
-      case 'quota_exceeded': return t(t('配额超限'));
-      case 'rate_limited': return t(t('请求过频'));
-      case 'upload_blocked': return t(t('上传被拦截'));
-      case 'share_create': return t(t('创建分享'));
-      case 'share_denied': return t(t('分享被拒绝'));
+      case 'file_upload': return t('上传文件');
+      case 'file_download': return t('下载文件');
+      case 'file_delete': return t('删除文件');
+      case 'file_list': return t('浏览文件');
+      case 'file_rename': return t('重命名');
+      case 'device_apply': return t('设备申请');
+      case 'device_connect': return t('设备连接');
+      case 'device_disconnect': return t('设备断开');
+      case 'code_generate': return t('生成验证码');
+      case 'code_verify': return t('验证设备');
+      case 'device_reject': return t('拒绝设备');
+      case 'device_blacklist': return t('拉黑设备');
+      case 'permission_denied': return t('权限拒绝');
+      case 'quota_exceeded': return t('配额超限');
+      case 'rate_limited': return t('请求过频');
+      case 'upload_blocked': return t('上传被拦截');
+      case 'share_create': return t('创建分享');
+      case 'share_denied': return t('分享被拒绝');
       default: return action;
     }
   }
@@ -289,7 +289,7 @@ class _TaskRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        result == 'success' ? t(t('完成')) : (result == 'denied' ? t(t('拒绝')) : result),
+                        result == 'success' ? t('完成') : (result == 'denied' ? t(t('拒绝')) : result),
                         style: TextStyle(
                           fontSize: 10,
                           color: _getResultColor(result),
@@ -303,7 +303,7 @@ class _TaskRow extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      t(t('设备: $deviceId')),
+                      t('设备: $deviceId'),
                       style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                     ),
                     if (ipAddress.isNotEmpty) ...[

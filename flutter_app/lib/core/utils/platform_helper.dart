@@ -8,8 +8,8 @@ class PlatformHelper {
   static bool get isLinux => Platform.isLinux;
   static bool get isIOS => Platform.isIOS;
 
-  /// Whether peer-to-peer mesh networking is supported
-  static bool get supportsMesh => isWindows || isAndroid;
+  /// Whether tsnet P2P networking is supported
+  static bool get supportsTsnet => isWindows || isAndroid;
 
   /// Whether server mode is available
   static bool get supportsServerMode => isWindows;

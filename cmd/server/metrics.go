@@ -7,10 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"frostleaves/pkg/metrics"
 )
 
 // ========== 系统指标（关于页用；纯标准库 + Windows API，无第三方依赖） ==========
@@ -77,6 +80,37 @@ type processMemoryCounters struct {
 	QuotaNonPagedPoolUsage     uintptr
 	PagefileUsage              uintptr
 	PeakPagefileUsage          uintptr
+}
+
+type processMemoryCountersEx struct {
+	CB                         uint32
+	PageFaultCount             uint32
+	PeakWorkingSetSize         uintptr
+	WorkingSetSize             uintptr
+	QuotaPeakPagedPoolUsage    uintptr
+	QuotaPagedPoolUsage        uintptr
+	QuotaPeakNonPagedPoolUsage uintptr
+	QuotaNonPagedPoolUsage     uintptr
+	PagefileUsage              uintptr
+	PeakPagefileUsage          uintptr
+	PrivateUsage               uintptr
+}
+
+// currentProcessMemoryEx returns (working set, private bytes) in bytes.
+// Private bytes is the Windows process private working set proxy used for the
+// dual-view memory panel (模块 6).
+func currentProcessMemoryEx() (uint64, uint64) {
+	h, err := syscall.GetCurrentProcess()
+	if err != nil {
+		return 0, 0
+	}
+	var pmc processMemoryCountersEx
+	pmc.CB = uint32(unsafe.Sizeof(pmc))
+	r, _, _ := procGetProcessMemoryInfo.Call(uintptr(h), uintptr(unsafe.Pointer(&pmc)), uintptr(pmc.CB))
+	if r == 0 {
+		return 0, 0
+	}
+	return uint64(pmc.WorkingSetSize), uint64(pmc.PrivateUsage)
 }
 
 func currentProcessMemory() uint64 {
@@ -215,32 +249,46 @@ func handleSystemMetrics(cfg ServerConfig) http.HandlerFunc {
 			diskPath = "."
 		}
 		diskTotal, diskFree := diskUsage(diskPath)
-		procMem := currentProcessMemory()
-		cpu := cpuUsage()
+		workingSet, procMem := currentProcessMemoryEx()
+		goMem := metrics.GoMemStats()
+		storage := metrics.ScanStorage(cfg.StorageRoot)
+		cpuApp, cpu := currentCPUReadings()
 		cores := cpuCount()
-		cpuApp := processCPUPercent(cores)
 
 		// FrostLeaves 占用：服务端进程内存（磁盘占用按 storage 目录大小近似）
 		diskUsed := uint64(0)
 		if diskTotal > diskFree {
 			diskUsed = diskTotal - diskFree
 		}
-		storageBytes := dirSize(cfg.StorageRoot)
+		storageBytes := storage.TotalBytes
 
 		data := map[string]interface{}{
-			"version":     AppVersion,
-			"cpu_cores":   cores,
-			"cpu_app":     cpuApp,
-			"cpu_percent": cpu,
-			"mem_total":   memTotal,
-			"mem_used":    memUsed,
-			"mem_app":     procMem,
-			"disk_total":  diskTotal,
-			"disk_used":   diskUsed,
-			"disk_free":   diskFree,
-			"disk_app":    storageBytes,
-			"disk_path":   diskPath,
-			"timestamp":   time.Now().Unix(),
+			"version":   AppVersion,
+			"cpu_cores": cores,
+			// 进程 CPU 以单核为 100%，多核并发可超 100%（1 秒间隔两次采样差值）
+			"cpu_app":        cpuApp,
+			"cpu_percent":    cpu,
+			"cpu_multi_core": cores > 1,
+			"cpu_note":       "CPU 为 1 秒间隔两次采样的瞬时值；进程占用以单核为 100%，多核并发时可超过 100%（最高 " + strconv.Itoa(cores*100) + "%）。",
+			// 内存双视角：专用工作集（对照任务管理器）与 Go 堆
+			"mem_total":           memTotal,
+			"mem_used":            memUsed,
+			"mem_app":             procMem,
+			"mem_app_private":     procMem,
+			"mem_app_working_set": workingSet,
+			"mem_app_heap":        goMem.HeapAllocBytes,
+			"mem_app_heap_sys":    goMem.HeapSysBytes,
+			"mem_app_sys":         goMem.SysBytes,
+			"mem_app_stack":       goMem.StackBytes,
+			// 存储：真实磁盘文件大小；回收站单列，合计与配额口径一致
+			"disk_total":       diskTotal,
+			"disk_used":        diskUsed,
+			"disk_free":        diskFree,
+			"disk_app":         storageBytes,
+			"disk_app_storage": storage.StorageBytes,
+			"disk_app_recycle": storage.RecycleBytes,
+			"disk_path":        diskPath,
+			"timestamp":        time.Now().Unix(),
 		}
 		writeJSON(w, 200, map[string]interface{}{"code": 0, "data": data})
 	}
@@ -257,4 +305,76 @@ func dirSize(root string) uint64 {
 		return nil
 	})
 	return total
+}
+
+// ========== 模块 6：1 秒间隔动态采样 ==========
+
+var (
+	metricsMu        sync.RWMutex
+	metricsCPUApp    float64
+	metricsCPUSystem float64
+)
+
+var (
+	sysCPUSampler = metrics.NewCPUSampler(readSystemCPU)
+	appCPUSampler = metrics.NewProcessSampler(readProcessCPU, time.Now)
+)
+
+// startMetricsSampler runs the 1-second sampling loop consumed by the panel.
+func startMetricsSampler() {
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			app, _ := appCPUSampler.Sample()
+			sys, _ := sysCPUSampler.Sample()
+			metricsMu.Lock()
+			metricsCPUApp = app
+			metricsCPUSystem = sys
+			metricsMu.Unlock()
+		}
+	}()
+}
+
+// currentCPUReadings returns the latest instantaneous CPU readings.
+func currentCPUReadings() (float64, float64) {
+	metricsMu.RLock()
+	defer metricsMu.RUnlock()
+	return metricsCPUApp, metricsCPUSystem
+}
+
+func readSystemCPU() (metrics.CPUCounter, error) {
+	var idle, kernel, user syscall.Filetime
+	r, _, _ := procGetSystemTimes.Call(
+		uintptr(unsafe.Pointer(&idle)),
+		uintptr(unsafe.Pointer(&kernel)),
+		uintptr(unsafe.Pointer(&user)),
+	)
+	if r == 0 {
+		return metrics.CPUCounter{}, syscall.EINVAL
+	}
+	return metrics.CPUCounter{
+		Idle:   filetimeToUint64(idle),
+		Kernel: filetimeToUint64(kernel),
+		User:   filetimeToUint64(user),
+	}, nil
+}
+
+func readProcessCPU() (uint64, error) {
+	h, err := syscall.GetCurrentProcess()
+	if err != nil {
+		return 0, err
+	}
+	var creation, exit, kernel, user syscall.Filetime
+	r, _, _ := procGetProcessTimes.Call(
+		uintptr(h),
+		uintptr(unsafe.Pointer(&creation)),
+		uintptr(unsafe.Pointer(&exit)),
+		uintptr(unsafe.Pointer(&kernel)),
+		uintptr(unsafe.Pointer(&user)),
+	)
+	if r == 0 {
+		return 0, syscall.EINVAL
+	}
+	return filetimeToUint64(kernel) + filetimeToUint64(user), nil
 }

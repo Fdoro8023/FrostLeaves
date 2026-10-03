@@ -506,7 +506,7 @@ class _ClientFileBrowserPageState extends ConsumerState<ClientFileBrowserPage> {
           FloatingMessage.show(
             context: context,
             title: t('上传失败'),
-            message: e.toString(),
+            message: ApiService.uploadLimitMessage(e) ?? ApiService.describeError(e),
             type: MessageType.error,
           );
         }
@@ -870,7 +870,9 @@ class _ClientFileBrowserPageState extends ConsumerState<ClientFileBrowserPage> {
                       itemBuilder: (ctx, i) {
                         final item = _items[i];
                         final isSelected = _selected.contains(item.name);
-                        return ListTile(
+                        return GestureDetector(
+                          onSecondaryTapDown: (d) => _showContextMenu(item, d.globalPosition),
+                          child: ListTile(
                           leading: _selectionMode && !item.isDirectory
                               ? Checkbox(value: isSelected, onChanged: (_) => _toggle(item.name))
                               : Icon(
@@ -941,12 +943,105 @@ class _ClientFileBrowserPageState extends ConsumerState<ClientFileBrowserPage> {
                               ),
                             ],
                           ),
+                        ),
                         );
                       },
                     ),
         ),
       ],
     );
+  }
+
+  /// 右键菜单（Windows 客户端）：复用页面已有的操作
+  Future<void> _showContextMenu(FileItem item, Offset pos) async {
+    final isDir = item.isDirectory;
+    final path = _joinRel(item.name);
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
+      items: [
+        if (isDir) PopupMenuItem(value: 'open', child: Text(t('进入文件夹'))),
+        if (!isDir) PopupMenuItem(value: 'download', child: Text(t('下载'))),
+        if (!isDir) PopupMenuItem(value: 'select', child: Text(t('多选'))),
+        PopupMenuItem(value: 'share', child: Text(t('创建分享'))),
+        PopupMenuItem(value: 'rename', child: Text(t('重命名'))),
+        PopupMenuItem(value: 'delete', child: Text(t('删除'))),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'upload', child: Text(t('上传到此目录'))),
+        PopupMenuItem(value: 'newFolder', child: Text(t('新建文件夹'))),
+        PopupMenuItem(value: 'refresh', child: Text(t('刷新'))),
+        PopupMenuItem(value: 'copyPath', child: Text(t('复制路径'))),
+        PopupMenuItem(value: 'details', child: Text(t('详情'))),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'open':
+        _navigateTo(path);
+        break;
+      case 'download':
+        _downloadFile(item.name);
+        break;
+      case 'select':
+        _toggle(item.name);
+        break;
+      case 'share':
+        setState(() {
+          _selected
+            ..clear()
+            ..add(item.name);
+        });
+        await _shareSelected();
+        break;
+      case 'rename':
+        _renameItem(item.name);
+        break;
+      case 'delete':
+        _deleteFile(item.name);
+        break;
+      case 'upload':
+        _uploadFile();
+        break;
+      case 'newFolder':
+        _createFolder();
+        break;
+      case 'refresh':
+        _loadFiles();
+        break;
+      case 'copyPath':
+        Clipboard.setData(ClipboardData(text: path));
+        FloatingMessage.show(
+          context: context,
+          title: t('已复制路径'),
+          message: path,
+          type: MessageType.success,
+        );
+        break;
+      case 'details':
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(t('详情')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${t('名称')}：${item.name}', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 6),
+                Text('${t('路径')}：$path', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 6),
+                Text('${t('类型')}：${isDir ? t('目录') : t('文件')}', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 6),
+                Text('${t('大小')}：${isDir ? '-' : item.formattedSize}', style: TextStyle(fontSize: 13)),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('关闭'))),
+            ],
+          ),
+        );
+        break;
+    }
   }
 
   void _showItemOptions(String name, bool isDirectory) {

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/api_service.dart';
+import '../../../core/services/update_checker.dart';
 
 /// 关于 Frost Leaves：CPU / 内存 / 磁盘占用可视化 + 版本信息
 class AboutPage extends ConsumerStatefulWidget {
@@ -126,11 +127,18 @@ class _AboutPageState extends ConsumerState<AboutPage> {
               title: 'CPU',
               total: 100,
               segments: [
-                _seg('Frost Leaves', (m['cpu_app'] ?? 0).toDouble(), AppTheme.successColor),
+                _seg('Frost Leaves', (m['cpu_app'] ?? 0).toDouble().clamp(0, 100).toDouble(), AppTheme.successColor),
                 _seg(t('其他程序'), ((m['cpu_percent'] ?? 0).toDouble() - (m['cpu_app'] ?? 0).toDouble()).clamp(0, 100).toDouble(), const Color(0xFF3B82F6)),
                 _seg(t('空闲'), (100 - (m['cpu_percent'] ?? 0).toDouble()).clamp(0, 100).toDouble(), const Color(0xFF6B7280)),
               ],
               totalText: t('100% · ${m["cpu_cores"] ?? "-"} 核'),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 12),
+              child: Text(
+                t('提示：CPU 为 1 秒间隔两次采样的瞬时值；进程占用以单核为 100%，多核并发时可超过 100%。'),
+                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              ),
             ),
             _usageBar(
               title: t('内存'),
@@ -157,7 +165,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           _infoCard(
             title: t('版本信息'),
             rows: [
-              [t('版本号'), 'v${m?['version'] ?? '1.0.1 beta'}'],
+              [t('版本号'), 'v${m?['version'] ?? '1.1.0 beta'}'],
               [t('服务器名称'), (_tls?['server_name'] ?? t('服务器')).toString()],
               [t('存储目录'), (m?['disk_path'] ?? '-').toString()],
               [t('Frost Leaves 存储占用'), _fmtBytes(m?['disk_app'] as num?)],
@@ -165,13 +173,23 @@ class _AboutPageState extends ConsumerState<AboutPage> {
               [t('HTTPS 证书指纹'), (_tls?['fingerprint'] ?? t('未启用')).toString()],
             ],
           ),
+          // 需求 2：服务端【关于-版本信息】页的检查更新入口
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () => runUpdateCheck(context, ref.read(apiServiceProvider)),
+              icon: const Icon(Icons.system_update_alt, size: 18),
+              label: Text(t('检查更新')),
+            ),
+          ),
           const SizedBox(height: 16),
           _infoCard(
             title: t('说明'),
             rows: [
               [t('数据来源'), t('本地服务端实时采样（每秒刷新）')],
-              [t('CPU 占用'), t('本进程占全部逻辑核心的百分比')],
+              [t('CPU 占用'), t('进程占用以单核为 100%，多核并发可超过 100%；数值为 1 秒间隔两次采样的瞬时值')],
               [t('绿色份额'), t('仅统计 Frost Leaves 自身进程')],
+              [t('内存口径'), t('Frost Leaves 占用为 Windows 专用工作集（可对照任务管理器）；另提供 Go 堆内存供核对')],
               [t('磁盘统计'), t('所在卷的总量 / 已用 / 空闲')],
               [t('用户协议'), t('完整 FrostLeaves 用户许可协议存放于程序目录 user_agreement.txt')],
             ],

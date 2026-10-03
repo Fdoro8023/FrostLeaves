@@ -19,7 +19,7 @@ func lanIPv4List() []string {
 		}
 		name := strings.ToLower(ifc.Name)
 		skip := false
-		for _, k := range []string{"wsl", "docker", "veth", "vmware", "hyper-v", "vethernet", "virtualbox", "loopback", "bluetooth"} {
+		for _, k := range []string{"mesh", "wsl", "docker", "veth", "vmware", "hyper-v", "vethernet", "virtualbox", "loopback", "bluetooth"} {
 			if strings.Contains(name, k) {
 				skip = true
 				break

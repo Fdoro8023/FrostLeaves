@@ -39,6 +39,8 @@ class _ServerSettingsPageState extends ConsumerState<ServerSettingsPage> {
   bool _loading = true;
   bool _saving = false;
   bool _autostart = false;
+  bool _forceEmailLogin = false;
+  bool _smtpReady = false;
   String? _status;
 
   static const _runKey = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
@@ -77,8 +79,21 @@ class _ServerSettingsPageState extends ConsumerState<ServerSettingsPage> {
       _maxFileSize.text = (cfg['max_file_size_bytes'] ?? 0).toString();
       _tunnelCommand.text = (cfg['tunnel_command'] ?? 'mesh').toString();
       _serverName.text = (cfg['server_name'] ?? t(t('服务器'))).toString();
+      _forceEmailLogin = cfg['force_email_login'] == true;
     } catch (e) {
       err = t(t('读取配置失败：$e'));
+    }
+
+    // 项目 4：强制邮箱登录需要 SMTP 就绪，先探一下
+    try {
+      final e = await api.getEmailConfig();
+      final ed = (e['data'] as Map?)?.cast<String, dynamic>() ?? {};
+      _smtpReady = ed['enabled'] == true &&
+          '${ed['host'] ?? ''}'.trim().isNotEmpty &&
+          ((ed['port'] ?? 0) as num) > 0 &&
+          '${ed['from_email'] ?? ''}'.trim().isNotEmpty;
+    } catch (_) {
+      _smtpReady = false;
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -128,6 +143,7 @@ class _ServerSettingsPageState extends ConsumerState<ServerSettingsPage> {
     merged['max_file_size_bytes'] = int.tryParse(_maxFileSize.text.trim()) ?? 0;
     merged['tunnel_command'] = _tunnelCommand.text.trim().isEmpty ? 'mesh' : _tunnelCommand.text.trim();
     merged['server_name'] = _serverName.text.trim().isEmpty ? t(t('服务器')) : _serverName.text.trim();
+    merged['force_email_login'] = _forceEmailLogin;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('serverExePath', _serverExe.text.trim());
@@ -213,6 +229,30 @@ class _ServerSettingsPageState extends ConsumerState<ServerSettingsPage> {
           Text(t(t('系统配置')),
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
           const SizedBox(height: 16),
+          _section(t(t('登录方式（项目 4）')), [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _forceEmailLogin,
+              onChanged: (v) {
+                if (v && !_smtpReady) {
+                  setState(() => _status =
+                      t(t('无法开启：请先在「邮箱注册」页配置并启用 SMTP 邮件服务')));
+                  return;
+                }
+                setState(() {
+                  _forceEmailLogin = v;
+                  _status = t(t('已修改，点【保存配置】生效'));
+                });
+              },
+              title: Text(t(t('强制启用邮箱帐号登录'))),
+              subtitle: Text(
+                _smtpReady
+                    ? t(t('开启后：客户端必须先完成邮箱验证码登录才能接入；关闭时：设备审核通过即可直接接入'))
+                    : t(t('需先在「邮箱注册」页配置并启用 SMTP 邮件服务')),
+                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              ),
+            ),
+          ]),
           _section(t(t('网络配置')), [
             _field(t(t('HTTP网关绑定地址')), _bindAddr, hint: t(t('0.0.0.0 允许局域网访问'))),
             _field(t(t('文件网关端口')), _port),

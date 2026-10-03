@@ -6,6 +6,7 @@ class DeviceModel {
   final String model;
   final String status;
   final String? ipAddress;
+  final String accountId;
   final String createdAt;
   final String updatedAt;
 
@@ -16,6 +17,7 @@ class DeviceModel {
     this.model = '',
     required this.status,
     this.ipAddress,
+    this.accountId = '',
     required this.createdAt,
     required this.updatedAt,
   });
@@ -28,6 +30,7 @@ class DeviceModel {
       model: json['model'] as String? ?? '',
       status: json['status'] as String? ?? 'pending',
       ipAddress: json['ip_address'] as String?,
+      accountId: json['account_id'] as String? ?? '',
       createdAt: json['created_at'] as String? ?? '',
       updatedAt: json['updated_at'] as String? ?? '',
     );

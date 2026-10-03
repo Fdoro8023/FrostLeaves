@@ -27,7 +27,7 @@ import (
 //   - 首次启动生成一棵自签根 CA（10 年），存放在 data/tls/
 //   - 用 CA 签发服务器证书，SAN 覆盖 localhost / 局域网 IP / 组网 IP / 主机名
 //   - IP 变化或证书 30 天内到期时自动重签
-//   - 局域网端口走 HTTPS；回环地址保留 HTTP（桌面端与组网 Funnel 不受影响）
+//   - 局域网端口走 HTTPS；回环地址保留 HTTP（桌面端与 组网公网访问 不受影响）
 
 // activeTLS 启动时注入，供 /api/v1/tls/info 使用
 var activeTLS *tlsMaterial
@@ -53,7 +53,7 @@ func newSerial() *big.Int {
 	return n
 }
 
-// allIPv4 返回所有非回环 IPv4（含组网虚拟网段的 100.x）
+// allIPv4 返回所有非回环 IPv4（含 组网 的 100.x）
 func allIPv4() []string {
 	ifaces, err := net.Interfaces()
 	if err != nil {

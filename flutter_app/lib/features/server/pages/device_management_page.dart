@@ -19,6 +19,8 @@ class _DeviceManagementPageState extends ConsumerState<DeviceManagementPage> wit
   List<DeviceModel> _devices = [];
   Timer? _refreshTimer;  // 需求 4：实时刷新定时器
   bool _loading = true;
+  // 需求 3：仅当服务端开启强制邮箱登录时，才展示设备归属账号
+  bool _forceEmailLogin = false;
 
   @override
   void initState() {
@@ -49,6 +51,14 @@ class _DeviceManagementPageState extends ConsumerState<DeviceManagementPage> wit
     try {
       final api = ref.read(apiServiceProvider);
       await api.loadSavedCredentials();
+      // 需求 3：先问服务端是否开启了强制邮箱登录
+      try {
+        final mode = await api.getLoginMode();
+        final md = mode['data'] as Map<String, dynamic>?;
+        if (mounted) setState(() => _forceEmailLogin = md?['force_email_login'] == true);
+      } catch (_) {
+        if (mounted) setState(() => _forceEmailLogin = false);
+      }
       final resp = await api.listDevices();
       final data = resp['data'] as Map<String, dynamic>?;
       final items = (data?['items'] as List?)?.map((e) => DeviceModel.fromJson(e as Map<String, dynamic>)).toList() ?? [];
@@ -81,8 +91,15 @@ class _DeviceManagementPageState extends ConsumerState<DeviceManagementPage> wit
   }
 
   List<DeviceModel> get _pendingDevices => _devices.where((d) => d.status == 'pending').toList();
-  List<DeviceModel> get _connectedDevices => _devices.where((d) => d.status == 'connected').toList();
-  List<DeviceModel> get _blockedDevices => _devices.where((d) => d.status == 'blacklisted').toList();
+  // 问题 3：已审批（approved）与已断开（disconnected）设备原先没有归属分类，导致
+  // 审核通过后设备"消失"。这里统一归入「已连接」页，用状态徽章区分在线/离线。
+  List<DeviceModel> get _connectedDevices => _devices
+      .where((d) =>
+          d.status == 'connected' || d.status == 'approved' || d.status == 'disconnected')
+      .toList();
+  // 问题 3：已拒绝（rejected）设备原先也不在任何分类内，一并归入「已拒绝/拉黑」页。
+  List<DeviceModel> get _blockedDevices =>
+      _devices.where((d) => d.status == 'blacklisted' || d.status == 'rejected').toList();
 
   Future<void> _approveDevice(String deviceId) async {
     try {
@@ -356,6 +373,12 @@ class _DeviceManagementPageState extends ConsumerState<DeviceManagementPage> wit
                         Text(
                           'IP: ${d.ipAddress}',
                           style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                        ),
+                      // 需求 3：强制邮箱登录时才展示归属账号
+                      if (_forceEmailLogin && d.accountId.isNotEmpty)
+                        Text(
+                          '${t(t('归属账号'))}: ${d.accountId}',
+                          style: TextStyle(fontSize: 12, color: AppTheme.primaryColor),
                         ),
                     ],
                   ),

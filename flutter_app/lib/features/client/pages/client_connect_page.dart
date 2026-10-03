@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/i18n/i18n.dart';
@@ -14,7 +15,7 @@ import '../../../core/services/local_storage_service.dart';
 import '../../../core/widgets/floating_message.dart';
 import '../../../core/services/connection_state.dart';
 
-enum _ConnectState { idle, applying, waitingApproval, verifying, connected, error }
+enum _ConnectState { idle, applying, waitingApproval, verifying, connected, error, emailLogin }
 
 class ClientConnectPage extends ConsumerStatefulWidget {
   const ClientConnectPage({super.key});
@@ -25,6 +26,12 @@ class ClientConnectPage extends ConsumerStatefulWidget {
 class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
   final _serverUrlController = TextEditingController();
   final _codeController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _emailCodeController = TextEditingController();
+  final _captchaInputController = TextEditingController();
+  String? _captchaId;
+  String? _captchaImage;
+  bool _showCodeEntry = false;
   _ConnectState _state = _ConnectState.idle;
   String _deviceId = '';
   String _errorMsg = '';
@@ -44,6 +51,9 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
     _statusTimer?.cancel();
     _serverUrlController.dispose();
     _codeController.dispose();
+    _emailController.dispose();
+    _emailCodeController.dispose();
+    _captchaInputController.dispose();
     super.dispose();
   }
 
@@ -212,15 +222,37 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
       try {
         api.setDeviceModel(await api.resolveDeviceModel());
       } catch (_) {}
-      // 真实平台（原来写死 android，Windows 设备会被误报）
-      final platform = Platform.isWindows
-          ? 'windows'
-          : (Platform.isAndroid
-              ? 'android'
-              : (Platform.isMacOS ? 'macos' : (Platform.isLinux ? 'linux' : Platform.operatingSystem)));
-      await api.applyDevice(_deviceId, 'My Device', platform);
+
+      // 项目 4：先问服务端登录方式；需求 1：同时校验版本号
+      bool forceEmail = false;
+      try {
+        final mode = await api.getLoginMode();
+        final md = mode['data'] as Map<String, dynamic>?;
+        forceEmail = md?['force_email_login'] == true;
+        final sv = (md?['server_version'] ?? '').toString();
+        if (sv.isNotEmpty && !_sameVersion(sv, ApiService.clientVersion)) {
+          setState(() => _state = _ConnectState.error);
+          await _showVersionMismatch(sv);
+          return;
+        }
+      } catch (_) {
+        // 旧版服务端没有该接口 → 退回设备验证流程
+      }
+
+      if (forceEmail) {
+        setState(() => _state = _ConnectState.emailLogin);
+        unawaited(_refreshCaptcha());
+        return;
+      }
+
+      await api.applyDevice(_deviceId, 'My Device', _platformName());
       setState(() => _state = _ConnectState.waitingApproval);
     } catch (e) {
+      if (ApiService.isVersionMismatch(e)) {
+        setState(() => _state = _ConnectState.error);
+        await _showVersionMismatch(ApiService.serverVersionFromError(e));
+        return;
+      }
       setState(() { _state = _ConnectState.error; _errorMsg = ApiService.describeError(e); });
     }
   }
@@ -248,6 +280,226 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
       unawaited(_checkStatus());
     } catch (e) {
       setState(() { _state = _ConnectState.error; _errorMsg = ApiService.describeError(e); });
+    }
+  }
+
+  String _platformName() => Platform.isWindows
+      ? 'windows'
+      : (Platform.isAndroid
+          ? 'android'
+          : (Platform.isMacOS
+              ? 'macos'
+              : (Platform.isLinux ? 'linux' : Platform.operatingSystem)));
+
+  /// 需求 1：版本归一化（去 v 前缀/空格/大小写）
+  static String _normVersion(String v) =>
+      v.trim().replaceAll(RegExp(r'^[vV]'), '').replaceAll(' ', '').toLowerCase();
+
+  static bool _sameVersion(String a, String b) => _normVersion(a) == _normVersion(b);
+
+  /// 需求 1：版本不匹配弹窗（拒绝连接并提示更新）
+  Future<void> _showVersionMismatch(String serverVersion) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('版本不匹配')),
+        content: Text(
+          '${t('客户端版本与服务端不一致，无法连接。')}\n'
+          '${t('客户端版本')}: ${ApiService.clientVersion}\n'
+          '${t('服务端版本')}: ${serverVersion.isEmpty ? t('未知') : serverVersion}\n\n'
+          '${t('请把客户端更新到与服务端一致的版本。')}',
+          style: const TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('知道了'))),
+        ],
+      ),
+    );
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// 项目 4①：等待审核阶段手动查询审核状态。
+  /// 返回：待审核 / 审核通过 / 拒绝；审核通过则免验证码直接接入。
+  Future<void> _queryApprovalStatus() async {
+    try {
+      final api = ref.read(apiServiceProvider);
+      final resp = await api.getDeviceStatus(_deviceId);
+      final data = resp['data'] as Map<String, dynamic>?;
+      final status = (data?['status'] ?? 'unknown').toString();
+      if (!mounted) return;
+      switch (status) {
+        case 'pending':
+          FloatingMessage.show(
+            context: context,
+            title: t('审核状态'),
+            message: t('待审核：管理员尚未处理，请稍候'),
+            type: MessageType.warning,
+          );
+          return;
+        case 'rejected':
+        case 'blacklisted':
+          setState(() {
+            _state = _ConnectState.error;
+            _errorMsg = status == 'blacklisted' ? t('已被服务端拉黑') : t('管理员已拒绝该设备');
+          });
+          _deviceId = const Uuid().v4().substring(0, 8);
+          return;
+        case 'approved':
+        case 'connected':
+        case 'disconnected':
+          // 审核通过 → 免验证码直接接入
+          final resp2 = await api.connectDevice(_deviceId);
+          final d2 = resp2['data'] as Map<String, dynamic>?;
+          if (d2 != null && d2['token'] != null) {
+            api.setCredentials(_deviceId, d2['token'] as String);
+          }
+          if (!mounted) return;
+          setState(() => _state = _ConnectState.connected);
+          _setConn(true);
+          _startStatusPolling();
+          unawaited(_checkStatus());
+          if (mounted) {
+            FloatingMessage.show(
+              context: context,
+              title: t('审核已通过'),
+              message: t('已直接接入服务器'),
+              type: MessageType.success,
+            );
+          }
+          return;
+        default:
+          FloatingMessage.show(
+            context: context,
+            title: t('审核状态'),
+            message: t('服务端未返回该设备，请重新申请连接'),
+            type: MessageType.error,
+          );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      FloatingMessage.show(
+        context: context,
+        title: t('查询失败'),
+        message: ApiService.describeError(e),
+        type: MessageType.error,
+      );
+    }
+  }
+
+  // ===== 项目 4②：邮箱验证码登录 / 注册 =====
+
+  Future<void> _refreshCaptcha() async {
+    try {
+      final api = ref.read(apiServiceProvider);
+      api.setServerUrl(_serverUrlController.text.trim());
+      final resp = await api.getCaptcha();
+      final data = resp['data'] as Map<String, dynamic>?;
+      if (!mounted) return;
+      setState(() {
+        _captchaId = (data?['id'] ?? '').toString();
+        _captchaImage = (data?['image'] ?? '').toString();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _ConnectState.error;
+        _errorMsg = ApiService.describeError(e);
+      });
+    }
+  }
+
+  Future<void> _requestEmailCode() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      _snack(t('请输入邮箱地址'));
+      return;
+    }
+    if (_captchaId == null || _captchaId!.isEmpty) {
+      _snack(t('请先获取图形验证码'));
+      return;
+    }
+    try {
+      final api = ref.read(apiServiceProvider);
+      api.setServerUrl(_serverUrlController.text.trim());
+      await api.requestEmailCode(
+          _captchaId!, _captchaInputController.text.trim(), email);
+      if (!mounted) return;
+      FloatingMessage.show(
+        context: context,
+        title: t('验证码已发送'),
+        message: t('请查收邮件并填写验证码'),
+        type: MessageType.success,
+      );
+      unawaited(_refreshCaptcha());
+    } catch (e) {
+      if (!mounted) return;
+      FloatingMessage.show(
+        context: context,
+        title: t('发送失败'),
+        message: ApiService.describeError(e),
+        type: MessageType.error,
+      );
+      unawaited(_refreshCaptcha());
+    }
+  }
+
+  Future<void> _doEmailLogin() async {
+    final email = _emailController.text.trim();
+    final code = _emailCodeController.text.trim();
+    if (email.isEmpty || code.isEmpty) {
+      _snack(t('请输入邮箱地址和验证码'));
+      return;
+    }
+    setState(() {
+      _state = _ConnectState.verifying;
+      _errorMsg = '';
+    });
+    try {
+      final api = ref.read(apiServiceProvider);
+      api.setServerUrl(_serverUrlController.text.trim());
+      final resp = await api.emailLogin(
+        email: email,
+        code: code,
+        deviceId: _deviceId,
+        deviceName: 'My Device',
+        platform: _platformName(),
+      );
+      final data = resp['data'] as Map<String, dynamic>?;
+      final token = data?['token'] as String?;
+      if (token != null && token.isNotEmpty) {
+        // 兼容返回令牌的服务端：直接接入
+        api.setCredentials(_deviceId, token);
+        if (!mounted) return;
+        setState(() => _state = _ConnectState.connected);
+        _setConn(true);
+        _startStatusPolling();
+        unawaited(_checkStatus());
+        return;
+      }
+      // 邮箱验证通过 ≠ 放行：仍需管理员在【设备管理-待审核】审核通过
+      if (!mounted) return;
+      setState(() => _state = _ConnectState.waitingApproval);
+      FloatingMessage.show(
+        context: context,
+        title: t('邮箱验证成功'),
+        message: t('设备已提交，等待管理员审核通过后即可接入'),
+        type: MessageType.success,
+      );
+    } catch (e) {
+      if (ApiService.isVersionMismatch(e)) {
+        setState(() => _state = _ConnectState.error);
+        await _showVersionMismatch(ApiService.serverVersionFromError(e));
+        return;
+      }
+      setState(() {
+        _state = _ConnectState.error;
+        _errorMsg = ApiService.describeError(e);
+      });
     }
   }
 
@@ -507,29 +759,176 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
                       Icon(Icons.hourglass_top, size: 40, color: AppTheme.warningColor),
                       const SizedBox(height: 12),
                       Text(t('等待管理员审批...'), style: TextStyle(color: AppTheme.textPrimary)),
+                      const SizedBox(height: 6),
+                      Text(t('管理员在「设备管理-待审核」中通过后，点击下方按钮查询即可直接接入'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                       const SizedBox(height: 16),
-                      TextField(
-                        controller: _codeController,
-                        decoration: InputDecoration(
-                          labelText: t('输入验证码'),
-                          hintText: t('8 位验证码'),
-                          prefixIcon: Icon(Icons.key),
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLength: 8,
-                      ),
-                      const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _verifyCode,
-                          child: Text(t('验证并连接')),
+                        child: ElevatedButton.icon(
+                          onPressed: _queryApprovalStatus,
+                          icon: const Icon(Icons.fact_check_outlined, size: 18),
+                          label: Text(t('审核状态查询')),
                         ),
                       ),
                       const SizedBox(height: 8),
                       TextButton(
+                        onPressed: () =>
+                            setState(() => _showCodeEntry = !_showCodeEntry),
+                        child: Text(_showCodeEntry ? t('收起验证码') : t('改用验证码接入')),
+                      ),
+                      if (_showCodeEntry) ...[
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: _codeController,
+                          decoration: InputDecoration(
+                            labelText: t('输入验证码'),
+                            hintText: t('8 位验证码'),
+                            prefixIcon: Icon(Icons.key),
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLength: 8,
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _verifyCode,
+                            child: Text(t('验证并连接')),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      TextButton(
                         onPressed: () => setState(() => _state = _ConnectState.idle),
                         child: Text(t('取消')),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // ===== 项目 4②：强制邮箱登录 =====
+              if (_state == _ConnectState.emailLogin) ...[
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.borderColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.mark_email_read_outlined,
+                              size: 22, color: AppTheme.primaryColor),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(t('该服务器已开启邮箱登录，请登录或注册'),
+                                style: TextStyle(color: AppTheme.textPrimary)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: t('邮箱地址'),
+                          hintText: 'you@example.com',
+                          prefixIcon: Icon(Icons.alternate_email),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _captchaInputController,
+                              decoration: InputDecoration(
+                                labelText: t('图形验证码'),
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            children: [
+                              GestureDetector(
+                                onTap: _refreshCaptcha,
+                                child: Container(
+                                  width: 110,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.surfaceColor,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: AppTheme.borderColor),
+                                  ),
+                                  child: Builder(builder: (_) {
+                                    final s = _captchaImage ?? '';
+                                    final idx = s.indexOf('base64,');
+                                    final b64 = idx >= 0 ? s.substring(idx + 7) : s;
+                                    if (b64.isEmpty) {
+                                      return Center(
+                                        child: Text(t('获取验证码'),
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: AppTheme.textSecondary)),
+                                      );
+                                    }
+                                    try {
+                                      return Image.memory(base64Decode(b64),
+                                          fit: BoxFit.contain);
+                                    } catch (_) {
+                                      return const SizedBox.shrink();
+                                    }
+                                  }),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _refreshCaptcha,
+                                child: Text(t('换一张'),
+                                    style: const TextStyle(fontSize: 12)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _requestEmailCode,
+                          icon: const Icon(Icons.send_outlined, size: 18),
+                          label: Text(t('发送邮箱验证码')),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _emailCodeController,
+                        decoration: InputDecoration(
+                          labelText: t('邮箱验证码'),
+                          prefixIcon: Icon(Icons.password),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _doEmailLogin,
+                          child: Text(t('登录并连接')),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => setState(() => _state = _ConnectState.idle),
+                          child: Text(t('取消')),
+                        ),
                       ),
                     ],
                   ),
@@ -612,6 +1011,8 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
         return const Color(0xFF8B5CF6);
       case _ConnectState.connected:
         return AppTheme.successColor;
+      case _ConnectState.emailLogin:
+        return AppTheme.primaryColor;
       case _ConnectState.error:
         return AppTheme.errorColor;
     }
@@ -629,6 +1030,8 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
         return Icons.verified;
       case _ConnectState.connected:
         return Icons.cloud_done;
+      case _ConnectState.emailLogin:
+        return Icons.mark_email_read_outlined;
       case _ConnectState.error:
         return Icons.error_outline;
     }
@@ -646,6 +1049,8 @@ class _ClientConnectPageState extends ConsumerState<ClientConnectPage> {
         return t('正在验证...');
       case _ConnectState.connected:
         return t('已连接');
+      case _ConnectState.emailLogin:
+        return t('邮箱登录');
       case _ConnectState.error:
         return t('连接失败');
     }

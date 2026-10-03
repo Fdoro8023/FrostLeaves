@@ -19,6 +19,10 @@ class ApiService {
   String? _adminToken;   // 服务端模式的管理通道令牌（需求 3）
   /// 服务端模式标记：管理接口必须走回环，否则会被服务端 403 拒绝
   bool serverMode = false;
+
+  /// 客户端版本号（需求 1：必须与服务端完全一致才能连接）。
+  /// 与服务端 cmd/server/main.go 的 AppVersion 保持一致。
+  static const String clientVersion = '1.1.0 beta';
   String? _deviceModel;  // 设备型号，随申请上报（需求 5）
   bool _credentialsLoaded = false;
 
@@ -57,6 +61,8 @@ class ApiService {
           if (_adminToken != null && _adminToken!.isNotEmpty) {
             options.headers['X-Admin-Token'] = _adminToken;
           }
+          // 需求 1：上报客户端版本，供服务端做一致性校验
+          options.headers['X-Client-Version'] = clientVersion;
           handler.next(options);
         },
         onError: (e, handler) async {
@@ -242,6 +248,40 @@ class ApiService {
     return resp.data as Map<String, dynamic>;
   }
 
+  // ========== 登录模式 / 免码接入 / 邮箱登录（项目 4） ==========
+
+  /// 查询服务端登录模式：是否强制邮箱登录、SMTP 是否就绪
+  Future<Map<String, dynamic>> getLoginMode() async {
+    final resp = await _authDio.get('/api/v1/login-mode');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 已审核通过的设备免验证码接入（管理员通过后直接拿令牌）
+  Future<Map<String, dynamic>> connectDevice(String deviceId) async {
+    await loadSavedCredentials();
+    final resp = await _authDio
+        .post('/api/v1/device/connect', data: {'device_id': deviceId});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 邮箱验证码登录（强制邮箱登录模式）；服务端会自动登记并放行本设备
+  Future<Map<String, dynamic>> emailLogin({
+    required String email,
+    required String code,
+    required String deviceId,
+    required String deviceName,
+    required String platform,
+  }) async {
+    final resp = await _authDio.post('/api/v1/auth/email/login', data: {
+      'email': email,
+      'code': code,
+      'device_id': deviceId,
+      'device_name': deviceName,
+      'platform': platform,
+    });
+    return resp.data as Map<String, dynamic>;
+  }
+
   /// 客户端主动退出服务器（设备令牌鉴权）：服务端撤销令牌并移除设备记录
   Future<Map<String, dynamic>> releaseDevice() async {
     await loadSavedCredentials();
@@ -325,6 +365,67 @@ class ApiService {
     await loadSavedCredentials();
     final resp = await _authDio.get('/api/v1/tls/info',
         options: Options(receiveTimeout: const Duration(seconds: 30)));
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 上传失败时把服务端返回的错误码翻译成用户可读的提示（项目 2）。
+  /// 返回 null 表示不是限制类错误，调用方应回退到 describeError()。
+  static String? uploadLimitMessage(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map) {
+        switch (data['code']) {
+          case 'limit_file_size':
+            return t('该文件大小超出服务端设置的限制');
+          case 'limit_storage':
+            return t('账号总存储空间已达服务端上限');
+          case 'limit_file_count':
+            return t('账号文件数量已达服务端上限');
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 需求 1：判断异常是否为「客户端/服务端版本不匹配」。
+  static bool isVersionMismatch(Object e) {
+    if (e is DioException) {
+      if (e.response?.statusCode == 426) return true;
+      final data = e.response?.data;
+      if (data is Map) {
+        final c = data['code'];
+        return c == 'version_mismatch' || c == 'version_required';
+      }
+    }
+    return false;
+  }
+
+  /// 需求 1：从异常里取出服务端上报的版本号（可能为空）。
+  static String serverVersionFromError(Object e) {
+    if (e is DioException) {
+      final data = e.response?.data;
+      if (data is Map) {
+        return (data['server_version'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
+  // ========== 检查更新（需求 2） ==========
+
+  /// 检查更新（refresh=true 时强制重新拉取 GitHub）
+  Future<Map<String, dynamic>> checkUpdate({bool refresh = false}) async {
+    final resp = await _authDio.get('/api/v1/update/check',
+        queryParameters: refresh ? const {'refresh': '1'} : null,
+        options: Options(receiveTimeout: const Duration(seconds: 40)));
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 通过服务端下载更新包到 <data>/updates/，返回本地路径与大小
+  Future<Map<String, dynamic>> downloadUpdate(String url, String name) async {
+    final resp = await _authDio.post('/api/v1/update/download',
+        data: {'url': url, 'name': name},
+        options: Options(receiveTimeout: const Duration(minutes: 30)));
     return resp.data as Map<String, dynamic>;
   }
 
@@ -561,7 +662,7 @@ class ApiService {
     return resp.data as Map<String, dynamic>;
   }
 
-  // ========== Tunnel APIs (admin, mesh public access) ==========
+  // ========== Tunnel APIs (admin, 组网公网访问) ==========
 
   Future<Map<String, dynamic>> getTunnelStatus() async {
     await loadSavedCredentials();
@@ -581,6 +682,163 @@ class ApiService {
     await loadSavedCredentials();
     final resp = await _authDio.post('/api/v1/tunnel/disable',
         options: Options(receiveTimeout: const Duration(minutes: 3)));
+    return resp.data as Map<String, dynamic>;
+  }
+
+  // ========== Policy / Account APIs (模块 3, admin) ==========
+
+  /// 全局策略（GET 返回 policy.Policy 全字段）
+  Future<Map<String, dynamic>> getGlobalPolicy() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/policy/global');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setGlobalPolicy(Map<String, dynamic> policy) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/policy/global', data: policy);
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 账号级覆盖：返回 {accountID: Override}
+  Future<Map<String, dynamic>> getAccountPolicies() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/policy/accounts');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 设置/清除账号覆盖（override 传 null 表示清除）
+  Future<Map<String, dynamic>> setAccountPolicy(String id, Map<String, dynamic>? override) async {
+    await loadSavedCredentials();
+    final resp = await _authDio
+        .post('/api/v1/admin/policy/account', data: {'id': id, 'override': override});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 设备级覆盖：返回 {deviceID: Override}
+  Future<Map<String, dynamic>> getDevicePolicies() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/policy/devices');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setDevicePolicy(String id, Map<String, dynamic>? override) async {
+    await loadSavedCredentials();
+    final resp = await _authDio
+        .post('/api/v1/admin/policy/device', data: {'id': id, 'override': override});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 设备归入账号
+  Future<Map<String, dynamic>> setDeviceAccount(String deviceId, String accountId) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/policy/device-account',
+        data: {'device_id': deviceId, 'account_id': accountId});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 某设备最终生效策略
+  Future<Map<String, dynamic>> getEffectivePolicy(String deviceId) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/policy/effective',
+        queryParameters: {'device': deviceId});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  // ========== Sessions & admin audit (模块 3) ==========
+
+  Future<Map<String, dynamic>> getSessions() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/sessions');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> forceLogout(String deviceId) async {
+    await loadSavedCredentials();
+    final resp = await _authDio
+        .post('/api/v1/admin/sessions/logout', data: {'device_id': deviceId});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getAdminAudit({int days = 7, int page = 1, int pageSize = 100, String? device, String? action}) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/audit', queryParameters: {
+      'days': days,
+      'page': page,
+      'page_size': pageSize,
+      if (device != null && device.isNotEmpty) 'device': device,
+      if (action != null && action.isNotEmpty) 'action': action,
+    });
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> pruneAudit() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/audit/prune');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  // ========== Email registration APIs (模块 5) ==========
+
+  /// 公开：图形验证码
+  Future<Map<String, dynamic>> getCaptcha() async {
+    final resp = await _authDio.get('/api/v1/auth/captcha');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 公开：请求邮箱验证码
+  Future<Map<String, dynamic>> requestEmailCode(String captchaId, String captchaCode, String email) async {
+    final resp = await _authDio.post('/api/v1/auth/email/request', data: {
+      'captcha_id': captchaId,
+      'captcha_code': captchaCode,
+      'email': email,
+    });
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 公开：校验邮箱验证码
+  Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
+    final resp = await _authDio.post('/api/v1/auth/email/verify',
+        data: {'email': email, 'code': code});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 管理：读取 SMTP 配置（密码会被清空）
+  Future<Map<String, dynamic>> getEmailConfig() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/email/config');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setEmailConfig(Map<String, dynamic> config) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/email/config', data: config);
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getEmailProviders() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/email/providers');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> applyEmailPreset(String provider) async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/email/preset', data: {'provider': provider});
+    return resp.data as Map<String, dynamic>;
+  }
+
+  // ========== Offline retention APIs (模块 7) ==========
+
+  Future<Map<String, dynamic>> getRetentionStatus() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.get('/api/v1/admin/retention/status');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> runRetention() async {
+    await loadSavedCredentials();
+    final resp = await _authDio.post('/api/v1/admin/retention/run');
     return resp.data as Map<String, dynamic>;
   }
 

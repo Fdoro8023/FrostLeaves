@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/services/api_service.dart';
 import '../../../core/services/local_storage_service.dart';
 import '../../../core/widgets/floating_message.dart';
+import '../../../core/services/update_checker.dart';
 
 /// 客户端【关于】：运行状态 / 版本信息 / 开发者信息（不含敏感项）
 class ClientAboutPage extends ConsumerStatefulWidget {
@@ -14,7 +15,7 @@ class ClientAboutPage extends ConsumerStatefulWidget {
   @override
   ConsumerState<ClientAboutPage> createState() => _ClientAboutPageState();
 
-  static const String clientVersion = 'v1.0.1 beta';
+  static const String clientVersion = 'v1.1.0 beta';
 }
 
 class _ClientAboutPageState extends ConsumerState<ClientAboutPage> {
@@ -163,6 +164,16 @@ class _ClientAboutPageState extends ConsumerState<ClientAboutPage> {
                         [t('运行平台'), Platform.isWindows ? 'Windows' : (Platform.isAndroid ? 'Android' : Platform.operatingSystem)],
                         [t('文件传输加密'), t('HTTPS (TLS)，由本软件内置实现')],
                       ]),
+                      // 需求 2：检查更新入口
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: () => runUpdateCheck(context, ref.read(apiServiceProvider)),
+                          icon: const Icon(Icons.system_update_alt, size: 18),
+                          label: Text(t('检查更新')),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(20),

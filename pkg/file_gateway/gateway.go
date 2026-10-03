@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"frostleaves/pkg/policy"
 	"frostleaves/pkg/security"
 )
 
@@ -59,6 +60,7 @@ type FileGateway struct {
 	auth        *Authenticator
 	shares      *ShareStore
 	adminSecret string
+	policyStore *policy.Store
 }
 
 func NewFileGateway(cfg GatewayConfig, quota *QuotaManager, audit *AuditLogger, auth *Authenticator) *FileGateway {
@@ -221,6 +223,15 @@ func (gw *FileGateway) authMiddleware(handler func(http.ResponseWriter, *http.Re
 			return
 		}
 
+		if gw.policyStore != nil && ctx.Role != "admin" {
+			if op, ok := policy.OpForPath(r.URL.Path); ok {
+				if err := gw.policyStore.AuthorizeOp(ctx.DeviceID, op); err != nil {
+					gw.audit.Log(ctx.DeviceID, "permission_denied", r.URL.Path, "denied", err.Error(), r.RemoteAddr)
+					writeJSON(w, 403, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+		}
 		handler(w, r, ctx)
 	}
 }
@@ -370,28 +381,49 @@ func (gw *FileGateway) handleUpload(w http.ResponseWriter, r *http.Request, ctx 
 
 	// Single file size check
 	// 需求 4：拒绝可执行文件/脚本（扩展名 + 魔数双重判断，防改名绕过）
+	var head []byte
 	if f, ferr := header.Open(); ferr == nil {
-		head := make([]byte, 512)
-		n, _ := io.ReadFull(f, head)
+		buf := make([]byte, 512)
+		n, _ := io.ReadFull(f, buf)
 		f.Close()
-		if bad, reason := security.SniffDangerous(header.Filename, head[:n]); bad {
-			gw.audit.Log(ctx.DeviceID, "upload_blocked", targetPath, "denied", reason, r.RemoteAddr)
-			writeJSON(w, 415, map[string]string{"error": "upload blocked: " + reason})
+		head = buf[:n]
+	}
+
+	// 模块 3：服务端权限/安全校验（注入策略时按三级策略；否则退回内置嗅探）
+	if gw.policyStore != nil {
+		req := policy.UploadRequest{
+			Name:      header.Filename,
+			Size:      header.Size,
+			Head:      head,
+			UsedBytes: gw.deviceUsageBytes(ctx.DeviceID),
+			FileCount: gw.deviceFileCount(ctx.DeviceID),
+		}
+		if err := gw.policyStore.AuthorizeUpload(ctx.DeviceID, req); err != nil {
+			gw.audit.Log(ctx.DeviceID, "upload_blocked", targetPath, "denied", err.Error(), r.RemoteAddr)
+			code := policy.CodePolicyDenied
+			if d, ok := err.(*policy.Denied); ok {
+				code = d.ErrorCode()
+			}
+			writeJSON(w, 403, map[string]string{"error": err.Error(), "code": code})
 			return
 		}
+	} else if bad, reason := security.SniffDangerous(header.Filename, head); bad {
+		gw.audit.Log(ctx.DeviceID, "upload_blocked", targetPath, "denied", reason, r.RemoteAddr)
+		writeJSON(w, 415, map[string]string{"error": "upload blocked: " + reason})
+		return
 	}
 
 	if gw.config.MaxFileSizeBytes > 0 && header.Size > gw.config.MaxFileSizeBytes {
 		gw.audit.Log(ctx.DeviceID, "quota_exceeded", targetPath, "denied",
 			fmt.Sprintf("file_size=%d > max=%d", header.Size, gw.config.MaxFileSizeBytes), r.RemoteAddr)
-		writeJSON(w, 413, map[string]string{"error": "file too large"})
+		writeJSON(w, 413, map[string]string{"error": "file too large", "code": policy.CodeFileSizeLimit})
 		return
 	}
 
 	// Quota check
 	if !gw.quota.CheckUploadQuota(ctx.DeviceID, header.Size) {
 		gw.audit.Log(ctx.DeviceID, "quota_exceeded", targetPath, "denied", "upload quota exhausted", r.RemoteAddr)
-		writeJSON(w, 403, map[string]string{"error": "upload quota exceeded"})
+		writeJSON(w, 403, map[string]string{"error": "upload quota exceeded", "code": policy.CodeStorageQuota})
 		return
 	}
 
@@ -968,25 +1000,24 @@ func (gw *FileGateway) handleRecycleList(w http.ResponseWriter, r *http.Request,
 	entries, err := os.ReadDir(recycleDir)
 	if err == nil {
 		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-
 			// Skip .meta files
 			if strings.HasSuffix(entry.Name(), ".meta") {
 				continue
 			}
 
-			info, err := entry.Info()
-			if err != nil {
-				continue
+			entryPath := filepath.Join(recycleDir, entry.Name())
+			var size int64
+			if entry.IsDir() {
+				size = dirSize(entryPath)
+			} else if info, ierr := entry.Info(); ierr == nil {
+				size = info.Size()
 			}
 
 			item := RecycleBinItem{
 				ID:    entry.Name(),
 				Name:  entry.Name(),
-				Size:  info.Size(),
-				IsDir: false,
+				Size:  size,
+				IsDir: entry.IsDir(),
 			}
 
 			// Try to read metadata
@@ -1007,8 +1038,10 @@ func (gw *FileGateway) handleRecycleList(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, 200, map[string]interface{}{
 		"code": 0,
 		"data": map[string]interface{}{
-			"total": len(items),
-			"items": items,
+			"total":          len(items),
+			"items":          items,
+			"usage_bytes":    gw.recycleUsageBytes(ctx.DeviceID),
+			"retention_days": gw.recycleRetentionDays(),
 		},
 	})
 }
@@ -1025,6 +1058,11 @@ func (gw *FileGateway) handleRecycleRestore(w http.ResponseWriter, r *http.Reque
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	if !safeRecycleID(req.ID) {
+		writeJSON(w, 400, map[string]string{"error": "invalid id"})
 		return
 	}
 
@@ -1055,13 +1093,10 @@ func (gw *FileGateway) handleRecycleRestore(w http.ResponseWriter, r *http.Reque
 	// Ensure parent directory exists
 	os.MkdirAll(filepath.Dir(originalPath), 0755)
 
-	// Move back
-	if err := os.Rename(recyclePath, originalPath); err != nil {
-		if err := gw.copyFile(recyclePath, originalPath); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "restore failed: " + err.Error()})
-			return
-		}
-		os.Remove(recyclePath)
+	// Move back (directories use moveDir so nested content is preserved)
+	if err := gw.movePath(recyclePath, originalPath); err != nil {
+		writeJSON(w, 500, map[string]string{"error": "restore failed: " + err.Error()})
+		return
 	}
 
 	// Remove metadata
@@ -1090,12 +1125,12 @@ func (gw *FileGateway) handleRecycleDelete(w http.ResponseWriter, r *http.Reques
 	deleted := 0
 
 	for _, id := range req.IDs {
-		recyclePath := filepath.Join(recycleDir, id)
-		metaPath := recyclePath + ".meta"
-
-		os.Remove(recyclePath)
-		os.Remove(metaPath)
-		deleted++
+		if !safeRecycleID(id) {
+			continue
+		}
+		if purgeRecycleItem(recycleDir, id) {
+			deleted++
+		}
 	}
 
 	gw.audit.Log(ctx.DeviceID, "recycle_permanent_delete", "", "success",
@@ -1118,40 +1153,46 @@ func (gw *FileGateway) handleRecycleClear(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, map[string]interface{}{"code": 0, "msg": "ok"})
 }
 
-// cleanupExpiredRecycleBin removes files older than 30 days
+// cleanupExpiredRecycleBin removes recycle-bin entries older than the
+// configured retention period (模块 2：过期自动清理). Files and folders are
+// both handled, and removal is recursive.
 func (gw *FileGateway) cleanupExpiredRecycleBin() {
+	days := gw.recycleRetentionDays()
+	if days <= 0 {
+		return
+	}
 	recycleBase := filepath.Join(gw.config.StorageRoot, "recycle_bin")
-	entries, err := os.ReadDir(recycleBase)
+	devices, err := os.ReadDir(recycleBase)
 	if err != nil {
 		return
 	}
 
-	cutoff := time.Now().AddDate(0, 0, -30)
+	cutoff := time.Now().AddDate(0, 0, -days)
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	for _, dev := range devices {
+		if !dev.IsDir() {
 			continue
 		}
 
-		deviceDir := filepath.Join(recycleBase, entry.Name())
-		files, err := os.ReadDir(deviceDir)
+		deviceDir := filepath.Join(recycleBase, dev.Name())
+		entries, err := os.ReadDir(deviceDir)
 		if err != nil {
 			continue
 		}
 
-		for _, file := range files {
-			if strings.HasSuffix(file.Name(), ".meta") {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".meta") {
 				continue
 			}
 
-			info, err := file.Info()
+			info, err := e.Info()
 			if err != nil {
 				continue
 			}
 
 			if info.ModTime().Before(cutoff) {
-				os.Remove(filepath.Join(deviceDir, file.Name()))
-				os.Remove(filepath.Join(deviceDir, file.Name()+".meta"))
+				_ = os.RemoveAll(filepath.Join(deviceDir, e.Name()))
+				_ = os.Remove(filepath.Join(deviceDir, e.Name()+".meta"))
 			}
 		}
 	}

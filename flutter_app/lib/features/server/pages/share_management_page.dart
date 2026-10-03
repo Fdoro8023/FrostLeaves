@@ -348,7 +348,7 @@ class _ShareManagementPageState extends ConsumerState<ShareManagementPage> {
     );
   }
 
-  /// 探测本机组网客户端 CLI 是否可用
+  /// 需求 7：探测本机 组网 CLI 是否可用
   Future<void> _detectTunnel() async {
     setState(() => _busy = true);
     try {
@@ -560,7 +560,7 @@ class _ShareManagementPageState extends ConsumerState<ShareManagementPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                t('前置条件：本机已安装 点对点私有组网客户端并完成登录；首次使用需在组网客户端后台为组网启用公网访问。'),
+                t('前置条件：本机已安装 点对点私有组网客户端并完成登录；首次使用需在 组网客户端后台为组网启用公网访问。'),
                 style: TextStyle(fontSize: 12, color: AppTheme.textSecondary.withOpacity(0.8)),
               ),
             ],

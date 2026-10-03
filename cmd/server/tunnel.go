@@ -15,10 +15,10 @@ import (
 	"time"
 )
 
-// ========== 点对点组网公网访问（Funnel）集成 ==========
+// ========== 组网公网访问 集成（需求 7 修复版） ==========
 //
-// 原实现的问题：直接执行组网 CLI，一旦它不在 PATH（Windows 上通常装在独立
-// 安装目录，路径不在 PATH 里）就整体报错，且错误信息笼统。
+// 原实现的问题：直接执行 `组网 ...`，一旦 CLI 不在 PATH（Windows 上装在
+// C:\Program Files\组网，路径通常不在 PATH 里）就整体报错，且错误信息笼统。
 //
 // 本版改进：
 //  1. 可执行文件解析：配置绝对路径 > PATH > Windows 常见安装目录
@@ -26,10 +26,8 @@ import (
 //  3. 开启时依次尝试多种命令变体（--yes / --https=443），把 CLI 原始输出回传
 //  4. 状态解析同时支持 --json 与文本输出
 
-var tunnelURLRe = regexp.MustCompile(`https://[A-Za-z0-9._-]+`)
+var tunnelURLRe = regexp.MustCompile(`https://[A-Za-z0-9._-]+\.ts\.net`)
 
-// windowsMeshPaths：Windows 上组网客户端的常见安装位置。
-// 如你的客户端不在 PATH 中，请在此补充它的绝对路径（或直接填到「组网命令」配置里）。
 var windowsMeshPaths = []string{}
 
 func tunnelCmdName(cfg ServerConfig) string {
@@ -40,7 +38,7 @@ func tunnelCmdName(cfg ServerConfig) string {
 	return c
 }
 
-// resolveTunnelExe 解析组网客户端可执行文件
+// resolveTunnelExe 解析 组网 可执行文件
 func resolveTunnelExe(cfg ServerConfig) (string, error) {
 	cmd := tunnelCmdName(cfg)
 
@@ -61,7 +59,7 @@ func resolveTunnelExe(cfg ServerConfig) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("未找到 %s 可执行文件：请先安装点对点私有组网客户端；若已安装，请在系统配置的「组网命令」里填绝对路径（例如 C:/Program Files/YourMeshClient/mesh.exe）", cmd)
+	return "", fmt.Errorf("未找到 %s 可执行文件：请先安装点对点私有组网客户端；若已安装，请在系统配置的「组网命令」里填绝对路径（例如 C:/Program Files/组网/mesh.exe）", cmd)
 }
 
 func runTunnel(exe string, args ...string) (string, error) {
@@ -277,7 +275,7 @@ func tunnelPreflight(cfg ServerConfig) map[string]interface{} {
 	}
 }
 
-// tunnelHint 针对已知的组网 CLI 报错给出可操作提示
+// tunnelHint 针对已知的 组网 CLI 报错给出可操作提示（需求 7）
 func tunnelHint(out string) string {
 	low := strings.ToLower(out)
 	switch {

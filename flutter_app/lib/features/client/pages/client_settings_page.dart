@@ -100,7 +100,7 @@ class _ClientSettingsPageState extends ConsumerState<ClientSettingsPage> {
                 Icon(Icons.chevron_right, size: 20, color: AppTheme.textSecondary),
               ]),
               const SizedBox(height: 12),
-              Text('Frost Leaves v1.0.1', style: TextStyle(color: AppTheme.textPrimary)),
+              Text('Frost Leaves v1.1.0', style: TextStyle(color: AppTheme.textPrimary)),
               const SizedBox(height: 4),
               Text(t('私有组网网盘 · 基于开源组件构建'), style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
               const SizedBox(height: 4),

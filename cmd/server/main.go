@@ -24,14 +24,19 @@ import (
 	"syscall"
 	"time"
 
+	"frostleaves/pkg/captcha"
+	"frostleaves/pkg/email"
 	"frostleaves/pkg/file_gateway"
+	"frostleaves/pkg/migration"
+	"frostleaves/pkg/policy"
+	"frostleaves/pkg/profile"
 	"frostleaves/pkg/security"
 )
 
 // ========== Version ==========
 
 const (
-	AppVersion = "1.0.1 beta"
+	AppVersion = "1.1.0 beta"
 	AppName    = "FrostLeaves"
 )
 
@@ -48,6 +53,8 @@ const (
 	StatusConnected   DeviceStatus = "connected"
 	StatusRejected    DeviceStatus = "rejected"
 	StatusBlacklisted DeviceStatus = "blacklisted"
+	// StatusDisconnected 仅用于展示：设备曾连接但令牌失效或心跳超时。
+	StatusDisconnected DeviceStatus = "disconnected"
 )
 
 type Device struct {
@@ -273,9 +280,27 @@ func (dm *DeviceManager) MarkSeen(deviceID string) {
 	}
 	now := time.Now()
 	d.LastSeenAt = &now
-	if d.Status == StatusApproved || d.Status == StatusConnected {
+	if d.Status == StatusApproved || d.Status == StatusConnected || d.Status == StatusDisconnected {
 		d.Status = StatusConnected
 	}
+}
+
+// MarkVerified 直接标记设备为已连接（邮箱验证码校验通过 / 审核通过免码接入）。
+func (dm *DeviceManager) MarkVerified(deviceID string) error {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	d, ok := dm.devices[deviceID]
+	if !ok {
+		return fmt.Errorf("device not found")
+	}
+	if d.Status == StatusBlacklisted {
+		return fmt.Errorf("device is blacklisted")
+	}
+	now := time.Now()
+	d.Status = StatusConnected
+	d.LastSeenAt = &now
+	d.UpdatedAt = now
+	return nil
 }
 
 func (dm *DeviceManager) GetDevice(deviceID string) (*Device, error) {
@@ -312,12 +337,16 @@ type ServerConfig struct {
 	AdminSecret      string `json:"admin_secret"`       // X-Admin-Token（非本机访问管理接口时校验）
 	AdminAllowRemote bool   `json:"admin_allow_remote"` // true 时允许非本机携带 admin_secret 访问管理接口
 
-	// 公网隧道（点对点组网 Funnel，见 docs/ARCHITECTURE.md）
-	TunnelCommand string `json:"tunnel_command"` // 组网客户端命令（名称或绝对路径，默认 mesh）
+	// 公网隧道（组网公网访问，见 docs/ROADMAP.md）
+	TunnelCommand string `json:"tunnel_command"` // 默认 mesh
 	TunnelPort    int    `json:"tunnel_port"`    // 0 = 使用 web_port
 
 	// 服务器名称（客户端展示，默认「服务器」）
 	ServerName string `json:"server_name"`
+
+	// ForceEmailLogin 要求客户端必须先完成邮箱验证码登录才能接入（项目 4）。
+	// 开启前必须已配置并启用 SMTP，否则配置保存会被拒绝。
+	ForceEmailLogin bool `json:"force_email_login"`
 
 	// 数据与启动行为
 	DataDir            string `json:"data_dir"`
@@ -444,6 +473,7 @@ var (
 
 func main() {
 	configPath := flag.String("config", "config.json", "Path to config file")
+	rollbackDir := flag.String("rollback", "", "Restore the data directory from a pre-upgrade backup folder and exit")
 	flag.Parse()
 
 	log.Printf("%s v%s starting...", AppName, AppVersion)
@@ -455,6 +485,17 @@ func main() {
 	// 首次运行生成随机密钥；确保数据目录存在
 	ensureSecrets(&cfg, activeConfigPath)
 	os.MkdirAll(cfg.DataDir, 0755)
+
+	// 模块 1：版本升级数据迁移（升级前自动备份 -> 迁移 -> 数据校验，失败自动回滚）
+	if *rollbackDir != "" {
+		if err := rollbackFromBackup(cfg.DataDir, *rollbackDir); err != nil {
+			log.Fatalf("[Migration] rollback failed: %v", err)
+		}
+		return
+	}
+	if err := migrateOnStartup(cfg.DataDir, AppVersion); err != nil {
+		log.Fatalf("[Migration] startup migration failed: %v", err)
+	}
 
 	// Warn about 0.0.0.0 binding
 	if cfg.HTTPBindAddr == "0.0.0.0" {
@@ -556,6 +597,43 @@ func main() {
 	gw.SetShareStore(shares)
 	shareStore = shares
 
+	// 模块 3：三级权限策略（全局/账号/设备），服务端强制校验
+	policyStore = policy.NewStore()
+	policyStore.SetStore(filepath.Join(cfg.DataDir, "policies.json"))
+	if err := policyStore.Load(); err != nil {
+		log.Printf("[Server] load policies failed: %v", err)
+	}
+	gw.SetPolicyStore(policyStore)
+	activeGateway = gw
+	// 模块 7：离线账户数据保留（启动评估 + 每日清理）
+	go offlineRetentionLoop(dm, auth, audit)
+
+	// 需求 2：每日自动检查一次新版本
+	go updateDailyCheckLoop()
+	// 模块 6：启动 1 秒间隔的监控采样
+	startMetricsSampler()
+
+	// 模块 5：邮箱注册 + SMTP 验证码（配置持久化到 data/email.json）
+	emailStore = email.NewStore()
+	emailStore.SetStore(filepath.Join(cfg.DataDir, "email.json"))
+	if err := emailStore.Load(); err != nil {
+		log.Printf("[Server] load email config failed: %v", err)
+	}
+	emailService = email.NewService(emailStore, captcha.NewManager(3*time.Minute, 4), audit)
+
+	// 模块 4：客户端/服务端个性化（设备显示名与头像、服务器名称与头像）
+	profileStore = profile.NewStore(filepath.Join(cfg.StorageRoot, "avatars"))
+	profileStore.SetStore(filepath.Join(cfg.DataDir, "profiles.json"))
+	if err := profileStore.Load(); err != nil {
+		log.Printf("[Server] load profiles failed: %v", err)
+	}
+	// 模块 3-9：按保留时长清理过期审计日志
+	if removed, err := audit.PruneRetention(auditRetentionDays(), time.Now()); err != nil {
+		log.Printf("[Server] audit retention prune failed: %v", err)
+	} else if removed > 0 {
+		log.Printf("[Server] audit retention: removed %d expired log file(s)", removed)
+	}
+
 	// Web service (for browser clients)
 	webMux := http.NewServeMux()
 	setupWebRoutes(webMux, dm, auth, quota, audit, cfg, activeConfigPath)
@@ -610,7 +688,7 @@ func main() {
 		}
 	}
 
-	// HTTP（仅回环：桌面端与组网 Funnel 使用）
+	// HTTP（仅回环：桌面端与 组网公网访问 使用）
 	webListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.WebPort))
 	if err != nil {
 		log.Printf("[WebService] Warning: Failed to listen on %s:%d: %v", cfg.HTTPBindAddr, cfg.WebPort, err)
@@ -749,6 +827,11 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 			return
 		}
 
+		// 需求 1：客户端版本必须与服务端完全一致
+		if !checkClientVersion(w, r, req.Platform) {
+			return
+		}
+
 		deviceModel := strings.TrimSpace(r.Header.Get("X-Device-Model"))
 		if err := dm.ApplyDevice(req.DeviceID, req.DeviceName, req.Platform, deviceModel); err != nil {
 			writeJSON(w, 403, map[string]string{"error": err.Error()})
@@ -764,28 +847,60 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 		if !adminAllowed(w, r, &cfg) {
 			return
 		}
-		status := r.URL.Query().Get("status")
-		devices := dm.ListDevices(status)
-		// 「已连接」= 令牌有效 且 60 秒内有过心跳；否则视为已断开（清掉僵尸记录）
+		requested := r.URL.Query().Get("status")
+		devices := dm.ListDevices("")
+		// 「已连接」= 令牌有效 且 60 秒内有过心跳；否则仅在本响应中展示为
+		// 「已断开」。这里返回副本，绝不修改持久化状态，否则设备会被永久降级。
+		out := make([]map[string]interface{}, 0, len(devices))
 		for _, d := range devices {
-			if d.Status != StatusConnected {
+			if d == nil {
 				continue
 			}
-			stale := !auth.HasToken(d.ID)
-			if !stale {
-				if d.LastSeenAt == nil || time.Since(*d.LastSeenAt) > 60*time.Second {
-					stale = true
+			cp := *d
+			if cp.Status == StatusConnected {
+				stale := !auth.HasToken(cp.ID)
+				if !stale {
+					if cp.LastSeenAt == nil || time.Since(*cp.LastSeenAt) > 60*time.Second {
+						stale = true
+					}
+				}
+				if stale {
+					cp.Status = StatusDisconnected
 				}
 			}
-			if stale {
-				d.Status = DeviceStatus("disconnected")
+			if requested != "" && string(cp.Status) != requested {
+				continue
 			}
+			item := map[string]interface{}{
+				"id":         cp.ID,
+				"name":       cp.Name,
+				"platform":   cp.Platform,
+				"status":     cp.Status,
+				"created_at": cp.CreatedAt,
+				"updated_at": cp.UpdatedAt,
+			}
+			if cp.Model != "" {
+				item["model"] = cp.Model
+			}
+			if cp.IPAddress != "" {
+				item["ip_address"] = cp.IPAddress
+			}
+			if cp.LastSeenAt != nil {
+				item["last_seen_at"] = cp.LastSeenAt
+			}
+			// 需求 3：仅在开启强制邮箱登录时返回归属账号
+			if cfg.ForceEmailLogin && policyStore != nil {
+				if acc := policyStore.AccountOf(cp.ID); acc != "" {
+					item["account_id"] = acc
+				}
+			}
+			out = append(out, item)
 		}
 		writeJSON(w, 200, map[string]interface{}{
 			"code": 0,
 			"data": map[string]interface{}{
-				"total": len(devices),
-				"items": devices,
+				"total": len(out),
+				"items": out,
 			},
 		})
 	})
@@ -1039,6 +1154,10 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 
 	// ===== 分享管理（访客链接） =====
 	// 管理员接口：/api/v1/share/create | list | revoke（仅本机或带 X-Admin-Token）
+	setupPolicyRoutes(mux, &cfg, audit, auth, dm, quota)
+	setupEmailRoutes(mux, &cfg, audit)
+	setupPersonalizationRoutes(mux, &cfg, audit, auth)
+
 	mux.HandleFunc("/api/v1/share/create", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAllowed(w, r, &cfg) {
 			return
@@ -1055,6 +1174,13 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 		if shareStore == nil {
 			writeJSON(w, 500, map[string]string{"error": "share store not initialized"})
 			return
+		}
+		if policyStore != nil {
+			if err := policyStore.AuthorizeOp("admin", policy.OpShare); err != nil {
+				audit.Log("admin", "permission_denied", req.Target, "denied", err.Error(), r.RemoteAddr)
+				writeJSON(w, 403, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 		sh, err := shareStore.Create(req)
 		if err != nil {
@@ -1264,6 +1390,9 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 				"devices":     len(dm.ListDevices("")),
 				"connected":   liveConnectedCount,
 				"server_name": cfg.ServerName,
+				// 模块 1：当前数据目录 schema 版本（便于确认迁移已生效）
+				"data_schema_version":  dataSchemaVersion(cfg.DataDir),
+				"data_schema_expected": migration.SchemaVersion,
 			},
 		})
 	})
@@ -1290,6 +1419,14 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 				writeJSON(w, 400, map[string]string{"error": err.Error()})
 				return
 			}
+			// 项目 4：强制邮箱登录必须先配好 SMTP，否则拒绝保存
+			if newCfg.ForceEmailLogin && !smtpConfigured() {
+				writeJSON(w, 400, map[string]string{
+					"error": "force_email_login requires an enabled SMTP email service (configure it under 邮箱注册 first)",
+					"code":  "smtp_not_configured",
+				})
+				return
+			}
 			// 密钥不接受远程修改，避免改错后所有设备掉线
 			newCfg.AuthSecret = cfg.AuthSecret
 			newCfg.AdminSecret = cfg.AdminSecret
@@ -1301,6 +1438,12 @@ func setupAuthRoutes(mux *http.ServeMux, dm *DeviceManager, auth *file_gateway.A
 			writeJSON(w, 405, map[string]string{"error": "method not allowed"})
 		}
 	})
+
+	// 项目 4：登录模式（强制邮箱登录 / 审核通过免验证码接入）
+	setupLoginFlowRoutes(mux, dm, auth, audit, &cfg)
+
+	// 需求 2：检查更新（检查 / 下载）
+	setupUpdateRoutes(mux, &cfg)
 }
 
 // ========== Web Service Routes ==========
