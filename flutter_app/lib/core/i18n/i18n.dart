@@ -554,7 +554,7 @@ const Map<String, String> _en = <String, String>{
   r'至 ${dt.toLocal().toString().substring(0, 16)}': r'Until ${dt.toLocal().toString().substring(0, 16)}',
   r'目录：${s["target"] ?? ""}': r'Folder: ${s["target"] ?? ""}',
   r'$permText · ${_expText(s)} · 下载 ${s["downloads"] ?? 0}': r'$permText · ${_expText(s)} · Download ${s["downloads"] ?? 0}',
-  r'前置条件：本机已安装 点对点私有组网客户端并完成登录；首次使用需在 组网客户端后台为组网启用公网访问。': r'Prerequisite: the peer-to-peer mesh client is installed and signed in. The first time, enable public access for the mesh in the mesh client's admin console.',
+  r'前置条件：本机已安装 点对点私有组网客户端并完成登录；首次使用需在 组网客户端后台为组网启用公网访问。': r'Prerequisite: the peer-to-peer mesh client is installed and signed in. The first time, enable public access for the mesh in the mesh client admin console.',
   '请先填写服务端程序路径（例如 D:\\private-netdisk\\FrostLeaves_Server.exe）': 'Enter the server executable path first (e.g. D:\\private-netdisk\\FrostLeaves_Server.exe)',
   r'局域网已启用 HTTPS（自签证书）。在本机装一次证书后，浏览器访问 https://<局域网IP>:9092 就不会再告警。': r'HTTPS is enabled on the LAN (self-signed certificate). After installing the certificate once, browsers will stop warning on https://<LAN IP>:9092.',
   r'手机/浏览器连不上，通常是 Windows 防火墙拦了这几个端口。点下面按钮自动放行（会弹 UAC 授权窗口）；若失败可查看手动步骤。': r'If phones or browsers cannot connect, Windows Firewall is usually blocking these ports. Click the button below to allow them automatically (a UAC prompt appears); if it fails, see the manual steps.',
